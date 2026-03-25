@@ -292,14 +292,33 @@ function POIntake({ currentUser }) {
   const [invDoDuplicateInfo, setInvDoDuplicateInfo] = React.useState(null);
   const [customers, setCustomers] = React.useState([]);
   const [stockItems, setStockItems] = React.useState([]);
-  const [history, setHistory] = React.useState([]);
-  const [showHistory, setShowHistory] = React.useState(false);
+  const [history,          setHistory]          = React.useState([]);
+  const [showHistory,      setShowHistory]      = React.useState(false);
+  const [masterUpdated,    setMasterUpdated]    = React.useState(null);
+  const [syncing,          setSyncing]          = React.useState(false);
   const fileRef = React.useRef();
 
-  React.useEffect(() => {
+  function loadMaster() {
     fetch("/api/prospects?type=master")
       .then(r=>r.json())
-      .then(d=>{ setCustomers(d.customers||[]); setStockItems(d.stockitems||[]); });
+      .then(d=>{
+        setCustomers(d.customers||[]);
+        setStockItems(d.stockitems||[]);
+        setMasterUpdated(d.customersUpdated || d.stockUpdated || null);
+      });
+  }
+
+  async function refreshMaster() {
+    setSyncing(true);
+    try {
+      await fetch("/api/sync-master", { method:"GET" });
+      await loadMaster();
+    } catch(e) { console.error(e); }
+    setSyncing(false);
+  }
+
+  React.useEffect(() => {
+    loadMaster();
     fetch("/api/prospects?type=po_intake_list")
       .then(r=>r.json())
       .then(d=>setHistory(d.list||[]));
@@ -501,24 +520,24 @@ ${poText}` }];
       if (!mode || mode === 'invoice') {
         const r = await fetch('/api/create-doc?type=invoice', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
         const d = await r.json();
-        if (d.duplicate) {
+        if (d.duplicate && !d.alreadyExisted) {
           setInvDoDuplicateInfo({ type:'invoice', ...d.details });
           setCreatingInvDo(false);
           return;
         }
-        if (d.error) throw new Error('Invoice: ' + d.error);
-        setIvResult(d);
+        if (d.error && !d.alreadyExisted) throw new Error('Invoice: ' + d.error);
+        setIvResult({ ...d, alreadyExisted: d.alreadyExisted });
       }
       if (!mode || mode === 'do') {
         const r = await fetch('/api/create-doc?type=do', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
         const d = await r.json();
-        if (d.duplicate) {
+        if (d.duplicate && !d.alreadyExisted) {
           setInvDoDuplicateInfo({ type:'do', ...d.details });
           setCreatingInvDo(false);
           return;
         }
-        if (d.error) throw new Error('DO: ' + d.error);
-        setDoResult(d);
+        if (d.error && !d.alreadyExisted) throw new Error('DO: ' + d.error);
+        setDoResult({ ...d, alreadyExisted: d.alreadyExisted });
       }
     } catch(e) {
       setInvDoError(e.message);
@@ -540,7 +559,18 @@ ${poText}` }];
           <div style={{fontSize:13,color:"#94A3B8"}}>Upload a customer PO — AI reads it, matches stock codes, and creates the SO directly in SQL Account</div>
         </div>
         <div style={{display:"flex",gap:8,alignItems:"center"}}>
-          <div style={{fontSize:11,color:"#94A3B8"}}>{customers.length} customers · {stockItems.length} items loaded</div>
+          <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+            <div style={{fontSize:11,color:"#94A3B8"}}>{customers.length} customers · {stockItems.length} items</div>
+            {masterUpdated && (
+              <div style={{fontSize:11,color:"#94A3B8"}}>
+                Updated: {new Date(masterUpdated).toLocaleString("en-MY",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"})}
+              </div>
+            )}
+            <button onClick={refreshMaster} disabled={syncing}
+              style={{padding:"4px 12px",borderRadius:8,border:"1px solid #E2E8F0",background:"#F8FAFC",color:"#1E3A5F",fontSize:11,fontWeight:700,cursor:syncing?"not-allowed":"pointer",opacity:syncing?0.6:1}}>
+              {syncing?"⏳ Syncing...":"🔄 Refresh"}
+            </button>
+          </div>
           <button onClick={()=>setShowHistory(!showHistory)} style={{padding:"7px 14px",borderRadius:8,border:"1px solid #E2E8F0",background:"#F8FAFC",color:"#64748B",fontSize:12,cursor:"pointer",fontWeight:600}}>
             {showHistory?"Hide":"📋 History"} ({history.length})
           </button>
@@ -624,11 +654,15 @@ ${poText}` }];
               </div>
               <div>
                 <div style={{fontSize:10,color:"#94A3B8",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:5}}>Customer Code *</div>
-                <select value={extracted.customerCode||""} onChange={e=>setExtracted({...extracted,customerCode:e.target.value})}
-                  style={{...inp,background:extracted.customerCode?"#fff":"#FEF2F2",borderColor:extracted.customerCode?"#E2E8F0":"#FCA5A5"}}>
-                  <option value="">— Select customer —</option>
-                  {customers.map(c=><option key={c.code} value={c.code}>{c.code} · {c.name}</option>)}
-                </select>
+                <SearchableSelect
+                  value={extracted.customerCode||""}
+                  onChange={v=>setExtracted({...extracted,customerCode:v})}
+                  options={customers}
+                  placeholder="Search customer code or name..."
+                  labelFn={c=>`${c.code} · ${c.name}`}
+                  highlight={!extracted.customerCode}
+                  style={{fontSize:11}}
+                />
               </div>
               <div>
                 <div style={{fontSize:10,color:"#94A3B8",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:5}}>PO Reference</div>
@@ -670,16 +704,22 @@ ${poText}` }];
                         <input value={item.description||""} onChange={e=>updateItem(i,"description",e.target.value)} style={{...inp,padding:"6px 9px",fontSize:11}} />
                       </td>
                       <td style={{padding:"7px 10px",width:"28%"}}>
-                        <select value={item.itemcode||""} onChange={e=>{
-                          const found = stockItems.find(s=>s.code===e.target.value);
-                          const updated=[...editedItems];
-                          updated[i]={...updated[i],itemcode:e.target.value,itemdescription:found?found.description:updated[i].description,unitprice:found&&found.unitprice?found.unitprice:updated[i].unitprice};
-                          updated[i].amount=(updated[i].qty||0)*(updated[i].unitprice||0);
-                          setEditedItems(updated);
-                        }} style={{...inp,padding:"6px 9px",fontSize:11,background:item.itemcode?"#fff":"#FFFBEB",borderColor:item.itemcode?"#E2E8F0":"#FCD34D"}}>
-                          <option value="">— Select stock item —</option>
-                          {stockItems.map(s=><option key={s.code} value={s.code}>{s.code} · {s.description}</option>)}
-                        </select>
+                        <SearchableSelect
+                          value={item.itemcode||""}
+                          onChange={v=>{
+                            const found = stockItems.find(s=>s.code===v);
+                            const updated=[...editedItems];
+                            updated[i]={...updated[i],itemcode:v,itemdescription:found?found.description:updated[i].description,unitprice:found&&found.unitprice?found.unitprice:updated[i].unitprice};
+                            updated[i].amount=(updated[i].qty||0)*(updated[i].unitprice||0);
+                            setEditedItems(updated);
+                          }}
+                          options={stockItems}
+                          valueKey="code"
+                          labelFn={s=>`${s.code} · ${s.description}`}
+                          placeholder="Search stock code..."
+                          highlight={!item.itemcode}
+                          style={{fontSize:11}}
+                        />
                       </td>
                       <td style={{padding:"7px 10px",width:"8%"}}>
                         <input type="number" value={item.qty||0} onChange={e=>updateItem(i,"qty",e.target.value)} style={{...inp,padding:"6px 9px",fontSize:11,textAlign:"center"}} />

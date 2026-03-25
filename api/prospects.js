@@ -63,14 +63,33 @@ export default async function handler(req, res) {
       }
 
       if (type === "master") {
-        const [customers, stockitems] = await Promise.all([
+        const [customers, stockitems, custUpdated, itemsUpdated] = await Promise.all([
           client.get('mazza_customers'),
           client.get('mazza_stockitems'),
+          client.get('mazza_customers_updated'),
+          client.get('mazza_stockitems_updated'),
         ]);
         return res.status(200).json({
-          customers:  customers  ? JSON.parse(customers)  : [],
-          stockitems: stockitems ? JSON.parse(stockitems) : [],
+          customers:       customers  ? JSON.parse(customers)  : [],
+          stockitems:      stockitems ? JSON.parse(stockitems) : [],
+          customersUpdated: custUpdated || null,
+          stockUpdated:     itemsUpdated || null,
         });
+      }
+
+      if (type === "trigger_master_sync") {
+        // Trigger a fresh sync of customers and stock items from SQL
+        // This calls sync-master internally
+        try {
+          const syncUrl = process.env.VERCEL_URL
+            ? `https://${process.env.VERCEL_URL}/api/sync-master`
+            : 'http://localhost:3000/api/sync-master';
+          const r = await fetch(syncUrl, { method:'GET' });
+          const d = await r.json();
+          return res.status(200).json(d);
+        } catch(e) {
+          return res.status(500).json({ error: e.message });
+        }
       }
 
       if (type === "po_intake_list") {
