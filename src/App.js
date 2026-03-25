@@ -457,7 +457,7 @@ ${poText}` }];
       };
 
       // POST to SQL Account via our server-side proxy
-      const res = await fetch("/api/create-so", {
+      const res = await fetch("/api/create-doc?type=so", {
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body: JSON.stringify({ soPayload, poMeta: {
