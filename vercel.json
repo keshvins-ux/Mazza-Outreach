@@ -2,6 +2,9 @@
   "functions": {
     "api/*.js": {
       "maxDuration": 30
+    },
+    "api/sync-master.js": {
+      "maxDuration": 60
     }
   }
 }

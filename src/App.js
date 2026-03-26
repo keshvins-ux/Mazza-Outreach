@@ -298,20 +298,22 @@ function POIntake({ currentUser }) {
   const [syncing,          setSyncing]          = React.useState(false);
   const fileRef = React.useRef();
 
-  function loadMaster() {
-    fetch("/api/prospects?type=master")
-      .then(r=>r.json())
-      .then(d=>{
-        setCustomers(d.customers||[]);
-        setStockItems(d.stockitems||[]);
-        setMasterUpdated(d.customersUpdated || d.stockUpdated || null);
-      });
+  async function loadMaster() {
+    const d = await fetch("/api/prospects?type=master").then(r=>r.json());
+    setCustomers(d.customers||[]);
+    setStockItems(d.stockitems||[]);
+    setMasterUpdated(d.customersUpdated || d.stockUpdated || null);
+    return d;
   }
 
   async function refreshMaster() {
     setSyncing(true);
     try {
+      // Trigger sync on server (writes to Redis)
       await fetch("/api/sync-master", { method:"GET" });
+      // Small delay to ensure Redis write completes before reading
+      await new Promise(r => setTimeout(r, 1500));
+      // Now read fresh data from Redis
       await loadMaster();
     } catch(e) { console.error(e); }
     setSyncing(false);
