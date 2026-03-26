@@ -47,21 +47,58 @@ async function getRedisClient() {
 // Check if a doc already exists in SQL-synced Redis data
 async function checkExistingInSQL(redis, type, soDocno) {
   if (!soDocno) return null;
+  // Check Redis first (fast)
   if (type === 'invoice') {
     const raw = await redis.get('mazza_invoice');
     const list = raw ? JSON.parse(raw) : [];
-    return list.find(iv => iv.soRef === soDocno || iv.docref1 === soDocno) || null;
+    const found = list.find(iv => iv.soRef === soDocno || iv.docref1 === soDocno || iv.id === soDocno);
+    if (found) return found;
   }
   if (type === 'do') {
     const raw = await redis.get('mazza_do');
     const list = raw ? JSON.parse(raw) : [];
-    return list.find(d => d.soRef === soDocno || d.docref1 === soDocno) || null;
+    const found = list.find(d => d.soRef === soDocno || d.docref1 === soDocno);
+    if (found) return found;
   }
   if (type === 'so') {
     const raw = await redis.get('mazza_so');
     const list = raw ? JSON.parse(raw) : [];
     return list.find(s => s.id === soDocno) || null;
   }
+  // Not found in Redis — do a live SQL check to catch recently created docs
+  // that haven't been synced yet
+  try {
+    const { SQL_ACCESS_KEY, SQL_SECRET_KEY, SQL_HOST, SQL_REGION, SQL_SERVICE } = process.env;
+    if (!SQL_ACCESS_KEY) return null;
+    const endpoint = type === 'invoice' ? '/salesinvoice' : '/deliveryorder';
+    const qs = `docref1=${encodeURIComponent(soDocno)}&limit=5`;
+    // Build AWS4 headers inline
+    const crypto = await import('crypto');
+    const now = new Date();
+    const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g,'').slice(0,15)+'Z';
+    const dateStamp = amzDate.slice(0,8);
+    const host = SQL_HOST.replace('https://','');
+    const payloadHash = crypto.default.createHash('sha256').update('','utf8').digest('hex');
+    const canonicalHeaders = `host:${host}\nx-amz-date:${amzDate}\n`;
+    const signedHeaders = 'host;x-amz-date';
+    const canonicalRequest = ['GET', endpoint, qs, canonicalHeaders, signedHeaders, payloadHash].join('\n');
+    const credScope = `${dateStamp}/${SQL_REGION}/${SQL_SERVICE}/aws4_request`;
+    const sts = ['AWS4-HMAC-SHA256', amzDate, credScope, crypto.default.createHash('sha256').update(canonicalRequest,'utf8').digest('hex')].join('\n');
+    function sign(key, msg) { return crypto.default.createHmac('sha256', key).update(msg).digest(); }
+    function getKey(key, d, r, s) { return sign(sign(sign(sign(Buffer.from('AWS4'+key), d), r), s), 'aws4_request'); }
+    const sig = crypto.default.createHmac('sha256', getKey(SQL_SECRET_KEY,dateStamp,SQL_REGION,SQL_SERVICE)).update(sts).digest('hex');
+    const headers = {
+      'Authorization': `AWS4-HMAC-SHA256 Credential=${SQL_ACCESS_KEY}/${credScope}, SignedHeaders=${signedHeaders}, Signature=${sig}`,
+      'x-amz-date': amzDate, 'Content-Type': 'application/json', 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0',
+    };
+    const r = await fetch(`${SQL_HOST}${endpoint}?${qs}`, { headers });
+    const text = await r.text();
+    if (!text.trim().startsWith('<!')) {
+      const data = JSON.parse(text);
+      const items = data.data || [];
+      if (items.length > 0) return { id: items[0].docno, dockey: items[0].dockey, fromLiveSQL: true };
+    }
+  } catch(e) { /* silently fail — Redis check was already done */ }
   return null;
 }
 
@@ -157,12 +194,20 @@ export default async function handler(req, res) {
 
     // ── CREATE INVOICE ────────────────────────────────────────────────────
     if (type === 'invoice') {
-      let { soDocno, customerCode, deliveryDate, items, description, note } = req.body;
+      let { soDocno, customerCode, deliveryDate, items, description, note, poNumber } = req.body;
       if (!items?.length) return res.status(400).json({ error: 'No items provided' });
 
       // 1. Resolve customer code
       customerCode = await resolveCustomerCode(redis, customerCode, soDocno);
       if (!customerCode) return res.status(400).json({ error: 'Cannot determine customer code. Please create via PO Intake or ensure SO is synced.' });
+
+      // 1b. Look up poNumber from OCC log if not passed
+      if (!poNumber && soDocno) {
+        const occRaw = await redis.get('mazza_po_intake');
+        const occAll = occRaw ? JSON.parse(occRaw) : [];
+        const occEntry = occAll.find(p => p.docno === soDocno);
+        if (occEntry?.poNumber) poNumber = occEntry.poNumber;
+      }
 
       // 2. Check if invoice ALREADY EXISTS in SQL (not just OCC log)
       const sqlExisting = await checkExistingInSQL(redis, 'invoice', soDocno);
@@ -192,12 +237,13 @@ export default async function handler(req, res) {
       const payload = {
         code: customerCode, docdate: today, postdate: today, taxdate: today,
         description: description || 'Sales Invoice',
-        docref1: soDocno || '', docref2: deliveryDate ? `DELIVERY DATE: ${deliveryDate}` : '',
+        docref1: poNumber || soDocno || '', docref2: soDocno ? `SO: ${soDocno}` : '',
         note: note || '',
         sdsdocdetail: items.map((item,idx) => ({
           itemcode: item.itemcode, description: item.description || item.itemdescription || '',
           qty: item.qty, uom: item.uom || 'UNIT', unitprice: item.unitprice,
           deliverydate: deliveryDate || today,
+          location: 'SW',
           disc: '', tax: '', taxamt: 0, taxrate: null, taxinclusive: false,
           seq: (idx+1)*1000,
         })),
@@ -224,12 +270,20 @@ export default async function handler(req, res) {
 
     // ── CREATE DO ─────────────────────────────────────────────────────────
     if (type === 'do') {
-      let { soDocno, customerCode, deliveryDate, items, description, note } = req.body;
+      let { soDocno, customerCode, deliveryDate, items, description, note, poNumber } = req.body;
       if (!items?.length) return res.status(400).json({ error: 'No items provided' });
 
       // 1. Resolve customer code
       customerCode = await resolveCustomerCode(redis, customerCode, soDocno);
       if (!customerCode) return res.status(400).json({ error: 'Cannot determine customer code. Please create via PO Intake or ensure SO is synced.' });
+
+      // 1b. Look up poNumber from OCC log if not passed
+      if (!poNumber && soDocno) {
+        const occRaw2 = await redis.get('mazza_po_intake');
+        const occAll2 = occRaw2 ? JSON.parse(occRaw2) : [];
+        const occEntry2 = occAll2.find(p => p.docno === soDocno);
+        if (occEntry2?.poNumber) poNumber = occEntry2.poNumber;
+      }
 
       // 2. Check if DO ALREADY EXISTS in SQL
       const sqlExisting = await checkExistingInSQL(redis, 'do', soDocno);
@@ -259,12 +313,13 @@ export default async function handler(req, res) {
       const payload = {
         code: customerCode, docdate: today, postdate: today, taxdate: today,
         description: description || 'Delivery Order',
-        docref1: soDocno || '', docref2: `DELIVERY DATE: ${delDate.split('-').reverse().join('/')}`,
+        docref1: poNumber || soDocno || '', docref2: `SO: ${soDocno || ''} | DELIVERY: ${delDate.split('-').reverse().join('/')}`,
         note: note || '',
         sdsdocdetail: items.map((item,idx) => ({
           itemcode: item.itemcode, description: item.description || item.itemdescription || '',
           qty: item.qty, uom: item.uom || 'UNIT', unitprice: item.unitprice,
           deliverydate: delDate,
+          location: 'SW',
           disc: '', tax: '', taxamt: 0, taxrate: null, taxinclusive: false,
           seq: (idx+1)*1000,
         })),

@@ -530,9 +530,12 @@ ${poText}` }];
           itemcode: item.itemcode,
           description: item.itemdescription||item.description,
           qty: item.qty,
+          uom: item.uom||'UNIT',
           unitprice: item.unitprice,
           amount: item.amount,
           deliverydate: extracted.deliveryDate||today,
+          location: 'SW',
+          seq: (idx+1)*1000,
         }))
       };
 
@@ -568,14 +571,15 @@ ${poText}` }];
   }
 
   async function createInvAndDO(mode) {
-    // mode: undefined = both, 'invoice' = invoice only, 'do' = DO only
+    // mode: 'invoice' = invoice only, 'do' = DO only
+    // Always use editedItems (what user confirmed/corrected) not soResult.items
     setCreatingInvDo(true);
     setInvDoError('');
     setInvDoDuplicateInfo(null);
-    const items = (soResult?.items || editedItems).filter(i => i.itemcode);
+    const items = editedItems.filter(i => i.itemcode);
     const customerCode = extracted?.customerCode;
     const delivDate = deliveryDateOverride || extracted?.deliveryDate || new Date().toISOString().slice(0,10);
-    const payload = { soDocno: soResult.docno, customerCode, deliveryDate: delivDate, items, note: invDoNote };
+    const payload = { soDocno: soResult.docno, customerCode, deliveryDate: delivDate, items, note: invDoNote, poNumber: soResult.poNumber || extracted?.poNumber || '' };
 
     try {
       if (!mode || mode === 'invoice') {
@@ -761,10 +765,10 @@ ${poText}` }];
                 <tbody>
                   {editedItems.map((item,i)=>(
                     <tr key={i} style={{borderTop:"1px solid #F1F5F9",background:!item.itemcode?"#FFFBEB":"#fff"}}>
-                      <td style={{padding:"7px 10px",width:"28%"}}>
+                      <td style={{padding:"7px 10px",width:"24%"}}>
                         <input value={item.description||""} onChange={e=>updateItem(i,"description",e.target.value)} style={{...inp,padding:"6px 9px",fontSize:11}} />
                       </td>
-                      <td style={{padding:"7px 10px",width:"28%"}}>
+                      <td style={{padding:"7px 10px",width:"26%"}}>
                         <SearchableSelect
                           value={item.itemcode||""}
                           onChange={v=>{
@@ -782,13 +786,13 @@ ${poText}` }];
                           style={{fontSize:11}}
                         />
                       </td>
-                      <td style={{padding:"7px 10px",width:"8%"}}>
-                        <input type="number" value={item.qty||0} onChange={e=>updateItem(i,"qty",e.target.value)} style={{...inp,padding:"6px 9px",fontSize:11,textAlign:"center"}} />
+                      <td style={{padding:"7px 10px",width:"11%"}}>
+                        <input type="number" value={item.qty||0} onChange={e=>updateItem(i,"qty",e.target.value)} min="0" max="9999" step="1" style={{...inp,padding:"6px 9px",fontSize:11,textAlign:"center",minWidth:70}} />
                       </td>
-                      <td style={{padding:"7px 10px",width:"12%"}}>
-                        <input type="number" value={item.unitprice||0} onChange={e=>updateItem(i,"unitprice",e.target.value)} style={{...inp,padding:"6px 9px",fontSize:11}} />
+                      <td style={{padding:"7px 10px",width:"14%"}}>
+                        <input type="number" value={item.unitprice||0} onChange={e=>updateItem(i,"unitprice",e.target.value)} step="0.01" min="0" style={{...inp,padding:"6px 9px",fontSize:11,minWidth:90}} />
                       </td>
-                      <td style={{padding:"7px 10px",width:"12%",fontWeight:700,color:"#0F172A",whiteSpace:"nowrap"}}>
+                      <td style={{padding:"7px 10px",width:"13%",fontWeight:700,color:"#0F172A",whiteSpace:"nowrap"}}>
                         RM {((item.qty||0)*(item.unitprice||0)).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}
                       </td>
                       <td style={{padding:"7px 10px"}}>
@@ -853,7 +857,7 @@ ${poText}` }];
           {/* Invoice + DO creation form */}
           {!ivResult && !doResult && (
             <div style={{background:"#fff",borderRadius:16,padding:"24px 28px",border:"1px solid #EEF2F7"}}>
-              <div style={{fontSize:14,fontWeight:800,color:"#0F172A",marginBottom:4}}>Create Invoice & Delivery Order</div>
+              <div style={{fontSize:14,fontWeight:800,color:"#0F172A",marginBottom:4}}>Create Documents — DO First, Then Invoice</div>
               <div style={{fontSize:12,color:"#94A3B8",marginBottom:16}}>Both will be linked to {soResult.docno} · Delivery date is adjustable</div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
                 <div>
@@ -888,18 +892,17 @@ ${poText}` }];
                   <button onClick={()=>setInvDoDuplicateInfo(null)} style={{marginTop:10,fontSize:11,color:"#92400E",background:"none",border:"none",cursor:"pointer",textDecoration:"underline"}}>Dismiss</button>
                 </div>
               )}
+              <div style={{background:"#F8FAFC",borderRadius:10,padding:"10px 14px",border:"1px solid #E2E8F0",marginBottom:12,fontSize:12,color:"#64748B"}}>
+                ℹ️ Create <strong>DO first</strong>, then <strong>Invoice</strong> — this ensures documents capture the correct details.
+              </div>
               <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-                <button onClick={createInvAndDO} disabled={creatingInvDo}
-                  style={{padding:"11px 24px",borderRadius:10,border:"none",background:creatingInvDo?"#CBD5E1":"#1E3A5F",color:"#fff",fontSize:13,fontWeight:700,cursor:creatingInvDo?"not-allowed":"pointer"}}>
-                  {creatingInvDo?"Creating...":"✨ Create Invoice & DO"}
+                <button onClick={createInvAndDO.bind(null,'do')} disabled={creatingInvDo||!!doResult}
+                  style={{padding:"11px 24px",borderRadius:10,border:"none",background:doResult?"#CBD5E1":creatingInvDo?"#CBD5E1":"#d97706",color:"#fff",fontSize:13,fontWeight:700,cursor:doResult||creatingInvDo?"not-allowed":"pointer"}}>
+                  {creatingInvDo?"Creating...":doResult?"✅ DO Created":"📦 Create DO"}
                 </button>
-                <button onClick={createInvAndDO.bind(null,'invoice')} disabled={creatingInvDo}
-                  style={{padding:"11px 20px",borderRadius:10,border:"1px solid #E2E8F0",background:"#F8FAFC",color:"#1E3A5F",fontSize:13,fontWeight:600,cursor:"pointer"}}>
-                  Invoice only
-                </button>
-                <button onClick={createInvAndDO.bind(null,'do')} disabled={creatingInvDo}
-                  style={{padding:"11px 20px",borderRadius:10,border:"1px solid #E2E8F0",background:"#F8FAFC",color:"#d97706",fontSize:13,fontWeight:600,cursor:"pointer"}}>
-                  DO only
+                <button onClick={createInvAndDO.bind(null,'invoice')} disabled={creatingInvDo||!!ivResult}
+                  style={{padding:"11px 24px",borderRadius:10,border:"none",background:ivResult?"#CBD5E1":creatingInvDo?"#CBD5E1":"#1E3A5F",color:"#fff",fontSize:13,fontWeight:700,cursor:ivResult||creatingInvDo?"not-allowed":"pointer"}}>
+                  {creatingInvDo?"Creating...":ivResult?"✅ Invoice Created":"🧾 Create Invoice"}
                 </button>
                 <button onClick={reset} style={{padding:"11px 20px",borderRadius:10,border:"1px solid #E2E8F0",background:"#F8FAFC",color:"#64748B",fontSize:13,cursor:"pointer"}}>
                   Skip — Process Another PO
@@ -910,15 +913,16 @@ ${poText}` }];
 
           {/* Both created */}
           {(ivResult || doResult) && (
-            <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-              {!ivResult && <button onClick={createInvAndDO.bind(null,'invoice')} disabled={creatingInvDo}
-                style={{padding:"11px 20px",borderRadius:10,border:"1px solid #BFDBFE",background:"#EFF6FF",color:"#1d4ed8",fontSize:13,fontWeight:600,cursor:"pointer"}}>
-                + Create Invoice
-              </button>}
+            <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
               {!doResult && <button onClick={createInvAndDO.bind(null,'do')} disabled={creatingInvDo}
-                style={{padding:"11px 20px",borderRadius:10,border:"1px solid #FED7AA",background:"#FFF7ED",color:"#d97706",fontSize:13,fontWeight:600,cursor:"pointer"}}>
-                + Create DO
+                style={{padding:"11px 20px",borderRadius:10,border:"none",background:"#d97706",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+                📦 Create DO
               </button>}
+              {doResult && !ivResult && <button onClick={createInvAndDO.bind(null,'invoice')} disabled={creatingInvDo}
+                style={{padding:"11px 20px",borderRadius:10,border:"none",background:"#1E3A5F",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+                🧾 Create Invoice
+              </button>}
+              {doResult && ivResult && <span style={{fontSize:12,color:"#16a34a",fontWeight:700}}>✅ All documents created</span>}
               <button onClick={reset} style={{padding:"11px 24px",borderRadius:10,border:"none",background:"#1E3A5F",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>
                 Process Another PO
               </button>

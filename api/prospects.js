@@ -102,16 +102,32 @@ export default async function handler(req, res) {
         const raw = await client.get('mazza_po');
         const pos = raw ? JSON.parse(raw) : [];
         // Enrich with line item count and offsetPct from mazza_do matching
-        return res.status(200).json({ pos: pos.map(p => ({
-          id:           p.id,
-          supplier:     p.supplier,
-          date:         p.date,
-          amount:       p.amount,
-          status:       p.status || 'Active',
-          deliveryDate: p.delivery || null,
-          itemCount:    p.itemCount || null,
-          offsetPct:    p.status === 'DONE' || p.status === 'Cancelled' ? 100 : 0,
-        }))});
+        // SQL Account PO status codes:
+        // 0 = Open, -1 = Partial, 1 = Closed/Done, -10 = Cancelled
+        function poStatus(p) {
+          const s = p.status;
+          if (s === 1  || s === 'DONE'      || s === 'Closed')    return { label:'Complete',  pct:100 };
+          if (s === -10 || s === 'Cancelled' || p.cancelled===true) return { label:'Cancelled', pct:100 };
+          if (s === -1 || s === 'PARTIAL')                          return { label:'Partial',   pct:50  };
+          // Check if PO has been fully offset via GRN
+          if (p.offsetAmt && p.amount && p.offsetAmt >= p.amount)  return { label:'Complete',  pct:100 };
+          if (p.offsetAmt && p.amount && p.offsetAmt > 0)          return { label:'Partial',   pct:Math.round((p.offsetAmt/p.amount)*100) };
+          return { label:'Pending', pct:0 };
+        }
+        return res.status(200).json({ pos: pos.map(p => {
+          const st = poStatus(p);
+          return {
+            id:           p.id,
+            supplier:     p.supplier,
+            date:         p.date,
+            amount:       p.amount,
+            status:       st.label,
+            cancelled:    p.cancelled || p.status === -10,
+            deliveryDate: p.delivery || null,
+            itemCount:    p.itemCount || null,
+            offsetPct:    st.pct,
+          };
+        })});
       }
 
       if (type === "pv_list") {
