@@ -106,13 +106,11 @@ export default async function handler(req, res) {
         // 0 = Open, -1 = Partial, 1 = Closed/Done, -10 = Cancelled
         function poStatus(p) {
           const s = p.status;
-          if (s === 1  || s === 'DONE'      || s === 'Closed')    return { label:'Complete',  pct:100 };
-          if (s === -10 || s === 'Cancelled' || p.cancelled===true) return { label:'Cancelled', pct:100 };
-          if (s === -1 || s === 'PARTIAL')                          return { label:'Partial',   pct:50  };
-          // Check if PO has been fully offset via GRN
-          if (p.offsetAmt && p.amount && p.offsetAmt >= p.amount)  return { label:'Complete',  pct:100 };
-          if (p.offsetAmt && p.amount && p.offsetAmt > 0)          return { label:'Partial',   pct:Math.round((p.offsetAmt/p.amount)*100) };
-          return { label:'Pending', pct:0 };
+          if (s === 1   || s === 'Complete' || s === 'Closed') return { label:'Complete', pct:100 };
+          if (s === -10 || s === 'Cancelled' || p.cancelled)   return { label:'Cancelled',pct:100 };
+          if (s === -1  || s === 'Partial')                    return { label:'Partial',  pct:50  };
+          // s === 0 or 'Open' or 'Pending' = genuinely open
+          return { label:'Open', pct:0 };
         }
         return res.status(200).json({ pos: pos.map(p => {
           const st = poStatus(p);

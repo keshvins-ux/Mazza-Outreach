@@ -10,75 +10,42 @@ function CreateDocPanel({ entry, onDone, onClose }) {
   const [creating,     setCreating]     = useState(false);
   const [result,       setResult]       = useState(null);
   const [error,        setError]        = useState("");
-  const [mode,         setMode]         = useState("both"); // both | invoice | do
+  const [doCreated,  setDoCreated]  = useState(null);
+  const [invCreated, setInvCreated] = useState(null);
 
   // Determine what's needed
   const needsInv = !entry.invoiceNo;
   const needsDO  = !entry.doNo;
-  const defaultMode = needsInv && needsDO ? "both" : needsInv ? "invoice" : "do";
-
-  useEffect(() => { setMode(defaultMode); }, []);
 
   // We need items to create INV/DO — fetch from OCC intake log or use a minimal payload
-  async function createDocs() {
+  const items = entry.items?.length ? entry.items : [{
+    itemcode: "MISC", description: entry.description || "Sales Order Items",
+    qty: 1, unitprice: entry.amount || 0, amount: entry.amount || 0, uom: "UNIT",
+  }];
+  const payload = { soDocno: entry.soNo, customerCode: entry.customerCode || entry.soNo, deliveryDate, items, note };
+
+  async function createDO() {
     setCreating(true); setError("");
     try {
-      // Build minimal items from what we know about this SO
-      // If OCC-logged, we have item detail; if SQL-only, we create a generic line
-      const items = entry.items?.length ? entry.items : [{
-        itemcode: "MISC",
-        description: entry.description || "Sales Order Items",
-        qty: 1,
-        unitprice: entry.amount || 0,
-        amount: entry.amount || 0,
-        uom: "UNIT",
-      }];
+      const r = await fetch("/api/create-doc?type=do", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(payload) });
+      const d = await r.json();
+      if (d.error && !d.duplicate && !d.alreadyExisted) throw new Error("DO: " + d.error);
+      setDoCreated(d.docno || d.details?.doNo || true);
+      if (!needsInv) { setResult({ doNo: d.docno }); setTimeout(() => onDone && onDone(), 2000); }
+    } catch(e) { setError(e.message); }
+    setCreating(false);
+  }
 
-      const payload = {
-        soDocno:      entry.soNo,
-        customerCode: entry.customerCode || entry.soNo, // fallback
-        deliveryDate,
-        items,
-        note,
-      };
-
-      const created = {};
-
-      if (mode === "both" || mode === "invoice") {
-        if (!entry.invoiceNo) {
-          const r = await fetch("/api/create-doc?type=invoice", {
-            method: "POST", headers: {"Content-Type":"application/json"},
-            body: JSON.stringify(payload),
-          });
-          const d = await r.json();
-          if (d.error && !d.duplicate && !d.alreadyExisted) throw new Error("Invoice: " + d.error);
-          created.invoiceNo = d.docno || d.details?.invoiceNo;
-          created.invoiceDuplicate = d.duplicate;
-          created.invoiceAlreadyExisted = d.alreadyExisted;
-          created.invoiceMessage = d.message;
-        }
-      }
-
-      if (mode === "both" || mode === "do") {
-        if (!entry.doNo) {
-          const r = await fetch("/api/create-doc?type=do", {
-            method: "POST", headers: {"Content-Type":"application/json"},
-            body: JSON.stringify(payload),
-          });
-          const d = await r.json();
-          if (d.error && !d.duplicate && !d.alreadyExisted) throw new Error("DO: " + d.error);
-          created.doNo = d.docno || d.details?.doNo;
-          created.doDuplicate = d.duplicate;
-          created.doAlreadyExisted = d.alreadyExisted;
-          created.doMessage = d.message;
-        }
-      }
-
-      setResult(created);
-      setTimeout(() => onDone && onDone(created), 2000);
-    } catch(e) {
-      setError(e.message);
-    }
+  async function createInvoice() {
+    setCreating(true); setError("");
+    try {
+      const r = await fetch("/api/create-doc?type=invoice", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(payload) });
+      const d = await r.json();
+      if (d.error && !d.duplicate && !d.alreadyExisted) throw new Error("Invoice: " + d.error);
+      setInvCreated(d.docno || d.details?.invoiceNo || true);
+      setResult({ doNo: doCreated, invoiceNo: d.docno });
+      setTimeout(() => onDone && onDone(), 2000);
+    } catch(e) { setError(e.message); }
     setCreating(false);
   }
 
@@ -111,17 +78,12 @@ function CreateDocPanel({ entry, onDone, onClose }) {
         <button onClick={onClose} style={{background:"none", border:"none", cursor:"pointer", color:"#94A3B8", fontSize:18, lineHeight:1}}>✕</button>
       </div>
 
-      {/* What needs to be created */}
-      <div style={{display:"flex", gap:8, marginBottom:14}}>
-        {needsInv && needsDO && (
-          <div style={{display:"flex", gap:6}}>
-            {[["both","Invoice + DO"],["invoice","Invoice only"],["do","DO only"]].map(([v,l])=>(
-              <button key={v} onClick={()=>setMode(v)} style={{padding:"5px 12px", borderRadius:99, border:"none", cursor:"pointer", fontSize:11, fontWeight:700, background:mode===v?"#1E3A5F":"#E2E8F0", color:mode===v?"#fff":"#64748B"}}>{l}</button>
-            ))}
-          </div>
-        )}
-        {needsInv && !needsDO && <span style={{fontSize:12, color:"#d97706", fontWeight:600}}>⚠️ Missing Invoice only</span>}
-        {!needsInv && needsDO  && <span style={{fontSize:12, color:"#7c3aed", fontWeight:600}}>⚠️ Missing DO only</span>}
+      {/* Status of what's needed */}
+      <div style={{background:"#F8FAFC", borderRadius:8, padding:"8px 12px", marginBottom:14, fontSize:11, color:"#64748B", border:"1px solid #E2E8F0"}}>
+        ℹ️ Create <strong>DO first</strong>, then <strong>Invoice</strong>.
+        {needsInv && needsDO && <span style={{marginLeft:8, color:"#dc2626", fontWeight:600}}>Both missing</span>}
+        {needsInv && !needsDO && <span style={{marginLeft:8, color:"#d97706", fontWeight:600}}>Invoice missing only</span>}
+        {!needsInv && needsDO && <span style={{marginLeft:8, color:"#7c3aed", fontWeight:600}}>DO missing only</span>}
       </div>
 
       {/* Customer info */}
@@ -157,11 +119,25 @@ function CreateDocPanel({ entry, onDone, onClose }) {
         </div>
       )}
 
-      <div style={{display:"flex", gap:8}}>
-        <button onClick={createDocs} disabled={creating}
-          style={{flex:1, padding:"11px", background:creating?"#CBD5E1":"#1E3A5F", border:"none", borderRadius:10, color:"#fff", fontSize:13, fontWeight:800, cursor:creating?"not-allowed":"pointer"}}>
-          {creating ? "Creating..." : `Create ${mode==="both"?"Invoice + DO":mode==="invoice"?"Invoice":"DO"} →`}
-        </button>
+      <div style={{display:"flex", gap:8, flexWrap:"wrap"}}>
+        {needsDO && !doCreated && (
+          <button onClick={createDO} disabled={creating}
+            style={{flex:1, padding:"11px", background:creating?"#CBD5E1":"#d97706", border:"none", borderRadius:10, color:"#fff", fontSize:13, fontWeight:800, cursor:creating?"not-allowed":"pointer"}}>
+            {creating ? "Creating..." : "📦 Create DO"}
+          </button>
+        )}
+        {doCreated && !entry.invoiceNo && needsInv && !invCreated && (
+          <button onClick={createInvoice} disabled={creating}
+            style={{flex:1, padding:"11px", background:creating?"#CBD5E1":"#1E3A5F", border:"none", borderRadius:10, color:"#fff", fontSize:13, fontWeight:800, cursor:creating?"not-allowed":"pointer"}}>
+            {creating ? "Creating..." : "🧾 Create Invoice"}
+          </button>
+        )}
+        {!needsDO && needsInv && !invCreated && (
+          <button onClick={createInvoice} disabled={creating}
+            style={{flex:1, padding:"11px", background:creating?"#CBD5E1":"#1E3A5F", border:"none", borderRadius:10, color:"#fff", fontSize:13, fontWeight:800, cursor:creating?"not-allowed":"pointer"}}>
+            {creating ? "Creating..." : "🧾 Create Invoice"}
+          </button>
+        )}
         <button onClick={onClose}
           style={{padding:"11px 16px", background:"#F1F5F9", border:"none", borderRadius:10, color:"#64748B", fontSize:13, cursor:"pointer"}}>
           Cancel
@@ -389,7 +365,7 @@ export default function DocumentTracker() {
                           <button onClick={e2=>{e2.stopPropagation(); setExpanded(isExp?null:e.soNo);}}
                             style={{padding:"5px 12px", borderRadius:8, border:"none", cursor:"pointer", fontSize:11, fontWeight:700,
                               background:isExp?"#1E3A5F":"#EFF6FF", color:isExp?"#fff":"#1d4ed8"}}>
-                            {isExp ? "▲ Close" : (!hasInv&&!hasDO) ? "➕ Create Both" : !hasInv ? "➕ Create Invoice" : "➕ Create DO"}
+                            {isExp ? "▲ Close" : (!hasInv&&!hasDO) ? "➕ Create DO + INV" : !hasInv ? "➕ Create Invoice" : "➕ Create DO"}
                           </button>
                         ) : (
                           <span style={{fontSize:10, background:"#F0FDF4", color:"#16a34a", padding:"2px 8px", borderRadius:99, fontWeight:700}}>✅ Complete</span>

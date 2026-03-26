@@ -125,7 +125,7 @@ function SupplierPOView() {
     const ms = !search || p.id?.toLowerCase().includes(search.toLowerCase()) ||
       p.supplier?.toLowerCase().includes(search.toLowerCase());
     const inDate = !cutoff || !p.date || new Date(p.date) >= cutoff;
-    if (filter==="open")     return ms && inDate && p.status!=="Cancelled" && (!p.offsetPct || p.offsetPct < 100);
+    if (filter==="open")     return ms && inDate && (p.status==="Open"||p.status==="Pending"||p.status==="Partial") && p.status!=="Cancelled" && p.status!=="Complete";
     if (filter==="partial")  return ms && inDate && p.offsetPct > 0 && p.offsetPct < 100;
     if (filter==="complete") return ms && inDate && p.offsetPct >= 100;
     return ms && inDate;
