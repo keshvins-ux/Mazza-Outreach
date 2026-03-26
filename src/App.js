@@ -273,6 +273,65 @@ function LoginScreen({ onLogin }) {
 }
 
 // ═══ PO INTAKE COMPONENT ═══
+// ─── Searchable Select ───────────────────────────────────────────────────────
+function SearchableSelect({ value, onChange, options, placeholder, valueKey="code", labelFn, highlight=false, style={} }) {
+  const [query, setQuery] = React.useState("");
+  const [open,  setOpen]  = React.useState(false);
+  const ref = React.useRef(null);
+  React.useEffect(() => {
+    function handle(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, []);
+  const selected = options.find(o => o[valueKey] === value);
+  const displayLabel = selected ? (labelFn ? labelFn(selected) : `${selected[valueKey]} · ${selected.name||selected.description||""}`) : "";
+  const filtered = query.trim()
+    ? options.filter(o => { const l = labelFn?labelFn(o):`${o[valueKey]} ${o.name||o.description||""}`; return l.toLowerCase().includes(query.toLowerCase()); }).slice(0,60)
+    : options.slice(0,80);
+  return (
+    <div ref={ref} style={{position:"relative",...style}}>
+      <div onClick={()=>{setOpen(o=>!o);setQuery("");}}
+        style={{padding:"8px 10px",borderRadius:8,border:`1px solid ${highlight&&!value?"#FCA5A5":open?"#1d4ed8":"#E2E8F0"}`,
+          background:highlight&&!value?"#FEF2F2":open?"#F8FAFC":"#fff",cursor:"pointer",fontSize:12,
+          color:value?"#0F172A":"#94A3B8",display:"flex",justifyContent:"space-between",alignItems:"center",minHeight:34}}>
+        <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>{value?displayLabel:placeholder}</span>
+        <span style={{color:"#94A3B8",fontSize:10,marginLeft:6,flexShrink:0}}>{open?"▲":"▼"}</span>
+      </div>
+      {open && (
+        <div style={{position:"absolute",top:"calc(100% + 4px)",left:0,right:0,zIndex:9999,
+          background:"#fff",borderRadius:10,border:"1px solid #E2E8F0",
+          boxShadow:"0 8px 24px rgba(0,0,0,0.12)",maxHeight:280,display:"flex",flexDirection:"column"}}>
+          <div style={{padding:"8px 10px",borderBottom:"1px solid #F1F5F9"}}>
+            <input autoFocus value={query} onChange={e=>setQuery(e.target.value)}
+              placeholder="Type to search..." onClick={e=>e.stopPropagation()}
+              style={{width:"100%",padding:"6px 10px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:12,outline:"none",boxSizing:"border-box"}}/>
+          </div>
+          <div style={{overflowY:"auto",flex:1}}>
+            <div onClick={()=>{onChange("");setOpen(false);setQuery("");}}
+              style={{padding:"8px 12px",fontSize:12,color:"#94A3B8",cursor:"pointer",borderBottom:"1px solid #F8FAFC"}}>
+              — {placeholder} —
+            </div>
+            {filtered.length===0&&<div style={{padding:"12px",fontSize:12,color:"#94A3B8",textAlign:"center"}}>No results for "{query}"</div>}
+            {filtered.map(o=>{
+              const label=labelFn?labelFn(o):`${o[valueKey]} · ${o.name||o.description||""}`;
+              const isSelected=o[valueKey]===value;
+              const matchIdx=query?label.toLowerCase().indexOf(query.toLowerCase()):-1;
+              return (
+                <div key={o[valueKey]} onClick={()=>{onChange(o[valueKey]);setOpen(false);setQuery("");}}
+                  style={{padding:"8px 12px",fontSize:12,cursor:"pointer",background:isSelected?"#EFF6FF":"#fff",
+                    color:isSelected?"#1d4ed8":"#0F172A",fontWeight:isSelected?700:400,borderBottom:"1px solid #F8FAFC"}}>
+                  {matchIdx>=0?(<>{label.slice(0,matchIdx)}<strong style={{color:"#1d4ed8"}}>{label.slice(matchIdx,matchIdx+query.length)}</strong>{label.slice(matchIdx+query.length)}</>):label}
+                </div>
+              );
+            })}
+          </div>
+          {options.length>80&&!query&&<div style={{padding:"6px 12px",fontSize:10,color:"#94A3B8",borderTop:"1px solid #F1F5F9",textAlign:"center"}}>Showing first 80 — type to search all {options.length}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function POIntake({ currentUser }) {
   const [stage, setStage] = React.useState("upload");
   const [poText, setPoText] = React.useState("");
