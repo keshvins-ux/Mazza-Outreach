@@ -4,6 +4,8 @@ import DemandTab from "./DemandTab";
 import DocumentTracker from "./DocumentTracker";
 import ProcurementTab from "./ProcurementTab";
 import SalesDashboard from "./SalesDashboard";
+import SalesGrowth from "./SalesGrowth";
+import SalesExecutive from "./SalesExecutive";
 import OperationsHome from "./OperationsHome";
 
 // ─── USER ACCOUNTS ──────────────────────────────────────────
@@ -1520,6 +1522,8 @@ function App() {
           {/* Sales tabs */}
           {(portal==="sales"||(!portal&&currentUser?.sales)) && currentUser?.sales && (<>
             <button onClick={()=>{setPortal("sales");setTab("sales_home");}} style={tabBtn(tab==="sales_home")}>📊 Overview</button>
+            <button onClick={()=>{setPortal("sales");setTab("sales_growth");}} style={tabBtn(tab==="sales_growth")}>🎯 Sales Intelligence</button>
+            <button onClick={()=>{setPortal("sales");setTab("sales_exec");}} style={tabBtn(tab==="sales_exec")}>📋 Weekly Summary</button>
             <button onClick={()=>{setPortal("sales");setTab("dashboard");}} style={tabBtn(tab==="dashboard")}>🤝 Leads</button>
             <button onClick={()=>{setPortal("sales");setTab("po");}} style={tabBtn(tab==="po")}>📥 PO Intake</button>
           </>)}
@@ -1566,6 +1570,12 @@ function App() {
       {/* ═══ DASHBOARD ═══ */}
             {/* ═══ SALES HOME ═══ */}
       {tab==="sales_home" && <SalesDashboard currentUser={currentUser} />}
+
+      {/* ═══ SALES INTELLIGENCE ═══ */}
+      {tab==="sales_growth" && <SalesGrowth currentUser={currentUser} />}
+
+      {/* ═══ SALES EXECUTIVE SUMMARY ═══ */}
+      {tab==="sales_exec" && <SalesExecutive currentUser={currentUser} />}
 
       {/* ═══ OPS HOME ═══ */}
       {tab==="ops_home" && <OperationsHome currentUser={currentUser} onNavigate={(t,sub)=>{ setPortal(t==="production"||t==="procurement"?"ops":"sales"); setTab(t); if(sub) setOpsView(sub); }} />}
