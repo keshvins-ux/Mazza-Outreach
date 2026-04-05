@@ -1,0 +1,1127 @@
+[
+  {
+    "itemCode": "MCP-005",
+    "description": "MEAT CURRY POWDER (S&S) 20KG",
+    "uom": [
+      "CARTON",
+      "CTN"
+    ],
+    "totalQty": 140,
+    "totalValue": 49840.0,
+    "soCount": 2,
+    "customers": [
+      "SPICES & SEASONINGS SPECIALITIES SDN. BHD.",
+      "SPICES & SEASONING SPECIALIST SDN BHD"
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00210",
+        "customer": "SPICES & SEASONINGS SPECIALITIES SDN. BHD.",
+        "qty": 80,
+        "uom": "CTN",
+        "date": "10/03/2026"
+      },
+      {
+        "soNo": "SO-00021",
+        "customer": "SPICES & SEASONING SPECIALIST SDN BHD",
+        "qty": 60,
+        "uom": "CARTON",
+        "date": "13/01/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "PCO-17KG",
+    "description": "PALM COOKING OIL 17KG",
+    "uom": [
+      "UNIT"
+    ],
+    "totalQty": 460,
+    "totalValue": 41420.0,
+    "soCount": 2,
+    "customers": [
+      "SAJIAN AMBANG SDN BHD",
+      "Q & A FOOD RESOURCES SDN BHD"
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00246",
+        "customer": "SAJIAN AMBANG SDN BHD",
+        "qty": 160,
+        "uom": "UNIT",
+        "date": "17/03/2026"
+      },
+      {
+        "soNo": "SO-00252",
+        "customer": "Q & A FOOD RESOURCES SDN BHD",
+        "qty": 300,
+        "uom": "UNIT",
+        "date": "16/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "DC-004",
+    "description": "DRIED CHILI 688",
+    "uom": [
+      "BAG"
+    ],
+    "totalQty": 200,
+    "totalValue": 25000.0,
+    "soCount": 1,
+    "customers": [
+      "SUNTRACO FOOD INDUSTRIES SDN BHD"
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00257",
+        "customer": "SUNTRACO FOOD INDUSTRIES SDN BHD",
+        "qty": 200,
+        "uom": "BAG",
+        "date": "18/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "CP-004",
+    "description": "CHILLI POWDER 125GM",
+    "uom": [
+      "CARTON"
+    ],
+    "totalQty": 100,
+    "totalValue": 20000.0,
+    "soCount": 1,
+    "customers": [
+      "AGRO 19 BERHAD"
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00192",
+        "customer": "AGRO 19 BERHAD",
+        "qty": 100,
+        "uom": "CARTON",
+        "date": "06/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "TP-003",
+    "description": "TURMERIC POWDER 125GM",
+    "uom": [
+      "CARTON"
+    ],
+    "totalQty": 100,
+    "totalValue": 16800.0,
+    "soCount": 1,
+    "customers": [
+      "AGRO 19 BERHAD"
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00192",
+        "customer": "AGRO 19 BERHAD",
+        "qty": 100,
+        "uom": "CARTON",
+        "date": "06/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "CP-002",
+    "description": "CHILLI POWDER 1KG",
+    "uom": [
+      "CTN",
+      "UNIT"
+    ],
+    "totalQty": 246,
+    "totalValue": 16602.0,
+    "soCount": 7,
+    "customers": [
+      "RESTORAN INDIA GATE SDN. BHD.",
+      "MH DELIGHT SDN BHD",
+      "SAUCE EMPIRE MANUFACTURING SDN BHD",
+      "ILHAM INTEGRASI SDN BHD",
+      "S ONE ONE F&B SDN. BHD.",
+      "AN NUUR FOOD INDUSTRIES SDN BHD"
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00254",
+        "customer": "S ONE ONE F&B SDN. BHD.",
+        "qty": 6,
+        "uom": "CTN",
+        "date": "18/03/2026"
+      },
+      {
+        "soNo": "SO-00243",
+        "customer": "AN NUUR FOOD INDUSTRIES SDN BHD",
+        "qty": 60,
+        "uom": "UNIT",
+        "date": "17/03/2026"
+      },
+      {
+        "soNo": "SO-00237",
+        "customer": "ILHAM INTEGRASI SDN BHD",
+        "qty": 10,
+        "uom": "UNIT",
+        "date": "16/03/2026"
+      },
+      {
+        "soNo": "SO-00239",
+        "customer": "MH DELIGHT SDN BHD",
+        "qty": 10,
+        "uom": "UNIT",
+        "date": "16/03/2026"
+      },
+      {
+        "soNo": "SO-00241",
+        "customer": "RESTORAN INDIA GATE SDN. BHD.",
+        "qty": 100,
+        "uom": "UNIT",
+        "date": "16/03/2026"
+      },
+      {
+        "soNo": "SO-00216",
+        "customer": "SAUCE EMPIRE MANUFACTURING SDN BHD",
+        "qty": 30,
+        "uom": "CTN",
+        "date": "11/03/2026"
+      },
+      {
+        "soNo": "SO-00182",
+        "customer": "SAUCE EMPIRE MANUFACTURING SDN BHD",
+        "qty": 30,
+        "uom": "CTN",
+        "date": "05/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "MCP-003",
+    "description": "MEAT CURRY POWDER 250GM",
+    "uom": [
+      "CARTON"
+    ],
+    "totalQty": 100,
+    "totalValue": 16000.0,
+    "soCount": 1,
+    "customers": [
+      "AGRO 19 BERHAD"
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00192",
+        "customer": "AGRO 19 BERHAD",
+        "qty": 100,
+        "uom": "CARTON",
+        "date": "06/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "FCP-003",
+    "description": "FISH CURRY POWDER 250GM",
+    "uom": [
+      "CARTON"
+    ],
+    "totalQty": 100,
+    "totalValue": 16000.0,
+    "soCount": 1,
+    "customers": [
+      "AGRO 19 BERHAD"
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00192",
+        "customer": "AGRO 19 BERHAD",
+        "qty": 100,
+        "uom": "CARTON",
+        "date": "06/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "MCP-002",
+    "description": "MEAT CURRY POWDER 1KG",
+    "uom": [
+      "CTN",
+      "UNIT"
+    ],
+    "totalQty": 66,
+    "totalValue": 11063.8,
+    "soCount": 5,
+    "customers": [
+      "ORMOND LIFESTYLE SERVICES SDN BHD",
+      "SAUCE EMPIRE MANUFACTURING SDN BHD",
+      "S ONE ONE F&B SDN. BHD."
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00260",
+        "customer": "ORMOND LIFESTYLE SERVICES SDN BHD",
+        "qty": 2,
+        "uom": "UNIT",
+        "date": "19/03/2026"
+      },
+      {
+        "soNo": "SO-00254",
+        "customer": "S ONE ONE F&B SDN. BHD.",
+        "qty": 5,
+        "uom": "CTN",
+        "date": "18/03/2026"
+      },
+      {
+        "soNo": "SO-00235",
+        "customer": "ORMOND LIFESTYLE SERVICES SDN BHD",
+        "qty": 4,
+        "uom": "UNIT",
+        "date": "16/03/2026"
+      },
+      {
+        "soNo": "SO-00216",
+        "customer": "SAUCE EMPIRE MANUFACTURING SDN BHD",
+        "qty": 15,
+        "uom": "CTN",
+        "date": "11/03/2026"
+      },
+      {
+        "soNo": "SO-00182",
+        "customer": "SAUCE EMPIRE MANUFACTURING SDN BHD",
+        "qty": 40,
+        "uom": "CTN",
+        "date": "05/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "CDM-001",
+    "description": "CARDAMOM 1KG",
+    "uom": [
+      "UNIT"
+    ],
+    "totalQty": 50,
+    "totalValue": 7450.0,
+    "soCount": 1,
+    "customers": [
+      "RESTORAN INDIA GATE SDN. BHD."
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00241",
+        "customer": "RESTORAN INDIA GATE SDN. BHD.",
+        "qty": 50,
+        "uom": "UNIT",
+        "date": "16/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "CMS-001",
+    "description": "CUMIN SEED 1KG",
+    "uom": [
+      "UNIT"
+    ],
+    "totalQty": 500,
+    "totalValue": 7000.0,
+    "soCount": 1,
+    "customers": [
+      "AN NUUR FOOD INDUSTRIES SDN BHD"
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00243",
+        "customer": "AN NUUR FOOD INDUSTRIES SDN BHD",
+        "qty": 500,
+        "uom": "UNIT",
+        "date": "17/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "FS-001",
+    "description": "FENNEL SEED 1KG",
+    "uom": [
+      "UNIT"
+    ],
+    "totalQty": 880,
+    "totalValue": 4885.0,
+    "soCount": 3,
+    "customers": [
+      "AN NUUR FOOD INDUSTRIES SDN BHD",
+      "KAMPONG KRAVERS (M) SDN BHD",
+      "RESTORAN INDIA GATE SDN. BHD."
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00243",
+        "customer": "AN NUUR FOOD INDUSTRIES SDN BHD",
+        "qty": 850,
+        "uom": "UNIT",
+        "date": "17/03/2026"
+      },
+      {
+        "soNo": "SO-00245",
+        "customer": "KAMPONG KRAVERS (M) SDN BHD",
+        "qty": 5,
+        "uom": "UNIT",
+        "date": "17/03/2026"
+      },
+      {
+        "soNo": "SO-00241",
+        "customer": "RESTORAN INDIA GATE SDN. BHD.",
+        "qty": 25,
+        "uom": "UNIT",
+        "date": "16/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "DC-002",
+    "description": "DRIED CHILI (WRINKLE) 1KG",
+    "uom": [
+      "BAG",
+      "UNIT"
+    ],
+    "totalQty": 76,
+    "totalValue": 3491.2,
+    "soCount": 5,
+    "customers": [
+      "SAJIAN AMBANG SDN BHD",
+      "ACETREND CORPORATION SDN BHD",
+      "ORMOND LIFESTYLE SERVICES SDN BHD",
+      "RESTORAN INDIA GATE SDN. BHD."
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00258",
+        "customer": "SAJIAN AMBANG SDN BHD",
+        "qty": 20,
+        "uom": "BAG",
+        "date": "19/03/2026"
+      },
+      {
+        "soNo": "SO-00260",
+        "customer": "ORMOND LIFESTYLE SERVICES SDN BHD",
+        "qty": 2,
+        "uom": "UNIT",
+        "date": "19/03/2026"
+      },
+      {
+        "soNo": "SO-00256",
+        "customer": "ACETREND CORPORATION SDN BHD",
+        "qty": 2,
+        "uom": "UNIT",
+        "date": "18/03/2026"
+      },
+      {
+        "soNo": "SO-00235",
+        "customer": "ORMOND LIFESTYLE SERVICES SDN BHD",
+        "qty": 2,
+        "uom": "UNIT",
+        "date": "16/03/2026"
+      },
+      {
+        "soNo": "SO-00241",
+        "customer": "RESTORAN INDIA GATE SDN. BHD.",
+        "qty": 50,
+        "uom": "UNIT",
+        "date": "16/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "MCP-004",
+    "description": "MEAT CURRY POWDER 3KG",
+    "uom": [
+      "CTN"
+    ],
+    "totalQty": 10,
+    "totalValue": 2970.0,
+    "soCount": 1,
+    "customers": [
+      "S ONE ONE F&B SDN. BHD."
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00254",
+        "customer": "S ONE ONE F&B SDN. BHD.",
+        "qty": 10,
+        "uom": "CTN",
+        "date": "18/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "CRS-001",
+    "description": "CORIANDER SEED 1KG",
+    "uom": [
+      "UNIT"
+    ],
+    "totalQty": 525,
+    "totalValue": 2895.0,
+    "soCount": 2,
+    "customers": [
+      "AN NUUR FOOD INDUSTRIES SDN BHD",
+      "RESTORAN INDIA GATE SDN. BHD."
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00243",
+        "customer": "AN NUUR FOOD INDUSTRIES SDN BHD",
+        "qty": 500,
+        "uom": "UNIT",
+        "date": "17/03/2026"
+      },
+      {
+        "soNo": "SO-00241",
+        "customer": "RESTORAN INDIA GATE SDN. BHD.",
+        "qty": 25,
+        "uom": "UNIT",
+        "date": "16/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "CMP-001",
+    "description": "CUMIN POWDER 1KG",
+    "uom": [
+      "UNIT"
+    ],
+    "totalQty": 60,
+    "totalValue": 2110.0,
+    "soCount": 2,
+    "customers": [
+      "ILHAM INTEGRASI SDN BHD",
+      "RESTORAN INDIA GATE SDN. BHD."
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00237",
+        "customer": "ILHAM INTEGRASI SDN BHD",
+        "qty": 10,
+        "uom": "UNIT",
+        "date": "16/03/2026"
+      },
+      {
+        "soNo": "SO-00241",
+        "customer": "RESTORAN INDIA GATE SDN. BHD.",
+        "qty": 50,
+        "uom": "UNIT",
+        "date": "16/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "MSD",
+    "description": "MASOOR DHALL",
+    "uom": [
+      "BAG"
+    ],
+    "totalQty": 28,
+    "totalValue": 2100.0,
+    "soCount": 2,
+    "customers": [
+      "KAMPONG KRAVERS (M) SDN BHD"
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00253",
+        "customer": "KAMPONG KRAVERS (M) SDN BHD",
+        "qty": 14,
+        "uom": "BAG",
+        "date": "18/03/2026"
+      },
+      {
+        "soNo": "SO-00245",
+        "customer": "KAMPONG KRAVERS (M) SDN BHD",
+        "qty": 14,
+        "uom": "BAG",
+        "date": "17/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "CF-002",
+    "description": "CHILLI FLAKES 1KG",
+    "uom": [
+      "CARTON",
+      "UNIT"
+    ],
+    "totalQty": 12,
+    "totalValue": 1950.0,
+    "soCount": 2,
+    "customers": [
+      "SAJIAN AMBANG SDN BHD",
+      "SAUCE EMPIRE MANUFACTURING SDN BHD"
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00258",
+        "customer": "SAJIAN AMBANG SDN BHD",
+        "qty": 2,
+        "uom": "UNIT",
+        "date": "19/03/2026"
+      },
+      {
+        "soNo": "SO-00216",
+        "customer": "SAUCE EMPIRE MANUFACTURING SDN BHD",
+        "qty": 10,
+        "uom": "CARTON",
+        "date": "11/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "BPS-001",
+    "description": "BLACK PEPPER SEED 1KG",
+    "uom": [
+      "UNIT"
+    ],
+    "totalQty": 50,
+    "totalValue": 1650.0,
+    "soCount": 1,
+    "customers": [
+      "RESTORAN INDIA GATE SDN. BHD."
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00241",
+        "customer": "RESTORAN INDIA GATE SDN. BHD.",
+        "qty": 50,
+        "uom": "UNIT",
+        "date": "16/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "TP-001",
+    "description": "TURMERIC POWDER 1KG",
+    "uom": [
+      "CTN",
+      "UNIT"
+    ],
+    "totalQty": 37,
+    "totalValue": 1573.6,
+    "soCount": 3,
+    "customers": [
+      "ORMOND LIFESTYLE SERVICES SDN BHD",
+      "ILHAM INTEGRASI SDN BHD",
+      "S ONE ONE F&B SDN. BHD."
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00254",
+        "customer": "S ONE ONE F&B SDN. BHD.",
+        "qty": 5,
+        "uom": "CTN",
+        "date": "18/03/2026"
+      },
+      {
+        "soNo": "SO-00235",
+        "customer": "ORMOND LIFESTYLE SERVICES SDN BHD",
+        "qty": 2,
+        "uom": "UNIT",
+        "date": "16/03/2026"
+      },
+      {
+        "soNo": "SO-00237",
+        "customer": "ILHAM INTEGRASI SDN BHD",
+        "qty": 30,
+        "uom": "UNIT",
+        "date": "16/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "AUSD-002",
+    "description": "AUSTRALIAN DHALL 5KG",
+    "uom": [
+      "BAG"
+    ],
+    "totalQty": 100,
+    "totalValue": 1175.0,
+    "soCount": 1,
+    "customers": [
+      "RESTORAN INDIA GATE SDN. BHD."
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00241",
+        "customer": "RESTORAN INDIA GATE SDN. BHD.",
+        "qty": 100,
+        "uom": "BAG",
+        "date": "16/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "CSM-001",
+    "description": "CHICKEN SEASONING MIX 1KG",
+    "uom": [
+      "UNIT"
+    ],
+    "totalQty": 40,
+    "totalValue": 1100.0,
+    "soCount": 1,
+    "customers": [
+      "OZVENTURES TRADING SDN. BHD."
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00242",
+        "customer": "OZVENTURES TRADING SDN. BHD.",
+        "qty": 40,
+        "uom": "UNIT",
+        "date": "17/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "CRP-001",
+    "description": "CORIANDER POWDER 1KG",
+    "uom": [
+      "UNIT"
+    ],
+    "totalQty": 60,
+    "totalValue": 812.0,
+    "soCount": 2,
+    "customers": [
+      "ILHAM INTEGRASI SDN BHD",
+      "RESTORAN INDIA GATE SDN. BHD."
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00237",
+        "customer": "ILHAM INTEGRASI SDN BHD",
+        "qty": 10,
+        "uom": "UNIT",
+        "date": "16/03/2026"
+      },
+      {
+        "soNo": "SO-00241",
+        "customer": "RESTORAN INDIA GATE SDN. BHD.",
+        "qty": 50,
+        "uom": "UNIT",
+        "date": "16/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "FSS-004",
+    "description": "FIVE SPICE 300GM",
+    "uom": [
+      "UNIT"
+    ],
+    "totalQty": 50,
+    "totalValue": 720.0,
+    "soCount": 1,
+    "customers": [
+      "MH DELIGHT SDN BHD"
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00239",
+        "customer": "MH DELIGHT SDN BHD",
+        "qty": 50,
+        "uom": "UNIT",
+        "date": "16/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "BFS-001",
+    "description": "BEEF SEASONING MIX 1KG",
+    "uom": [
+      "UNIT"
+    ],
+    "totalQty": 30,
+    "totalValue": 715.5,
+    "soCount": 1,
+    "customers": [
+      "OZVENTURES TRADING SDN. BHD."
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00242",
+        "customer": "OZVENTURES TRADING SDN. BHD.",
+        "qty": 30,
+        "uom": "UNIT",
+        "date": "17/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "BPS-002",
+    "description": "BLACK PEPPER SEED 500GM",
+    "uom": [
+      "CTN"
+    ],
+    "totalQty": 2,
+    "totalValue": 600.0,
+    "soCount": 1,
+    "customers": [
+      "S ONE ONE F&B SDN. BHD."
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00254",
+        "customer": "S ONE ONE F&B SDN. BHD.",
+        "qty": 2,
+        "uom": "CTN",
+        "date": "18/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "CNS-001",
+    "description": "CINNAMON STICK 1KG",
+    "uom": [
+      "UNIT"
+    ],
+    "totalQty": 20,
+    "totalValue": 500.0,
+    "soCount": 1,
+    "customers": [
+      "RESTORAN INDIA GATE SDN. BHD."
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00241",
+        "customer": "RESTORAN INDIA GATE SDN. BHD.",
+        "qty": 20,
+        "uom": "UNIT",
+        "date": "16/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "GMM-002",
+    "description": "GARAM MASALA MIX 500GM",
+    "uom": [
+      "UNIT"
+    ],
+    "totalQty": 10,
+    "totalValue": 460.0,
+    "soCount": 1,
+    "customers": [
+      "SAJIAN AMBANG SDN BHD"
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00258",
+        "customer": "SAJIAN AMBANG SDN BHD",
+        "qty": 10,
+        "uom": "UNIT",
+        "date": "19/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "PCO-008",
+    "description": "PALM COOKING OIL 17KG",
+    "uom": [
+      "UNIT"
+    ],
+    "totalQty": 5,
+    "totalValue": 457.5,
+    "soCount": 1,
+    "customers": [
+      "ORMOND LIFESTYLE SERVICES SDN BHD"
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00260",
+        "customer": "ORMOND LIFESTYLE SERVICES SDN BHD",
+        "qty": 5,
+        "uom": "UNIT",
+        "date": "19/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "CSN-CR",
+    "description": "CASHEW NUT (CRUSHED) 1KG",
+    "uom": [
+      "UNIT"
+    ],
+    "totalQty": 20,
+    "totalValue": 400.0,
+    "soCount": 1,
+    "customers": [
+      "KAMPONG KRAVERS (M) SDN BHD"
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00253",
+        "customer": "KAMPONG KRAVERS (M) SDN BHD",
+        "qty": 20,
+        "uom": "UNIT",
+        "date": "18/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "SA-001",
+    "description": "STAR ANISE 1KG",
+    "uom": [
+      "UNIT"
+    ],
+    "totalQty": 20,
+    "totalValue": 400.0,
+    "soCount": 1,
+    "customers": [
+      "RESTORAN INDIA GATE SDN. BHD."
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00241",
+        "customer": "RESTORAN INDIA GATE SDN. BHD.",
+        "qty": 20,
+        "uom": "UNIT",
+        "date": "16/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "PP-002",
+    "description": "PAPRIKA POWDER 1KG",
+    "uom": [
+      "UNIT"
+    ],
+    "totalQty": 10,
+    "totalValue": 300.0,
+    "soCount": 1,
+    "customers": [
+      "ILHAM INTEGRASI SDN BHD"
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00237",
+        "customer": "ILHAM INTEGRASI SDN BHD",
+        "qty": 10,
+        "uom": "UNIT",
+        "date": "16/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "GN",
+    "description": "GROUND NUT",
+    "uom": [
+      "BAG"
+    ],
+    "totalQty": 1,
+    "totalValue": 200.0,
+    "soCount": 1,
+    "customers": [
+      "KAMPONG KRAVERS (M) SDN BHD"
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00245",
+        "customer": "KAMPONG KRAVERS (M) SDN BHD",
+        "qty": 1,
+        "uom": "BAG",
+        "date": "17/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "PR-GHEE-0.9KG",
+    "description": "PURE GHEE 900G X 12 TIN",
+    "uom": [
+      "CTN"
+    ],
+    "totalQty": 5,
+    "totalValue": 197.5,
+    "soCount": 1,
+    "customers": [
+      "SAJIAN AMBANG SDN BHD"
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00258",
+        "customer": "SAJIAN AMBANG SDN BHD",
+        "qty": 5,
+        "uom": "CTN",
+        "date": "19/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "CRP-002",
+    "description": "CORIANDER POWDER 250GM",
+    "uom": [
+      "CTN"
+    ],
+    "totalQty": 1,
+    "totalValue": 152.0,
+    "soCount": 1,
+    "customers": [
+      "S ONE ONE F&B SDN. BHD."
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00254",
+        "customer": "S ONE ONE F&B SDN. BHD.",
+        "qty": 1,
+        "uom": "CTN",
+        "date": "18/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "MS-001",
+    "description": "MUSTARD SEEDS 1KG",
+    "uom": [
+      "UNIT"
+    ],
+    "totalQty": 27,
+    "totalValue": 137.0,
+    "soCount": 2,
+    "customers": [
+      "KAMPONG KRAVERS (M) SDN BHD",
+      "RESTORAN INDIA GATE SDN. BHD."
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00245",
+        "customer": "KAMPONG KRAVERS (M) SDN BHD",
+        "qty": 2,
+        "uom": "UNIT",
+        "date": "17/03/2026"
+      },
+      {
+        "soNo": "SO-00241",
+        "customer": "RESTORAN INDIA GATE SDN. BHD.",
+        "qty": 25,
+        "uom": "UNIT",
+        "date": "16/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "BPC-003",
+    "description": "BLACK PEPPER CRUSH 1KG",
+    "uom": [
+      "UNIT"
+    ],
+    "totalQty": 2,
+    "totalValue": 100.0,
+    "soCount": 1,
+    "customers": [
+      "KAMPONG KRAVERS (M) SDN BHD"
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00245",
+        "customer": "KAMPONG KRAVERS (M) SDN BHD",
+        "qty": 2,
+        "uom": "UNIT",
+        "date": "17/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "BPC-001",
+    "description": "BLACK PEPPER COARSE 1KG",
+    "uom": [
+      "UNIT"
+    ],
+    "totalQty": 2,
+    "totalValue": 96.0,
+    "soCount": 1,
+    "customers": [
+      "KAMPONG KRAVERS (M) SDN BHD"
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00245",
+        "customer": "KAMPONG KRAVERS (M) SDN BHD",
+        "qty": 2,
+        "uom": "UNIT",
+        "date": "17/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "FCP-002",
+    "description": "FISH CURRY POWDER 1KG",
+    "uom": [
+      "UNIT"
+    ],
+    "totalQty": 4,
+    "totalValue": 79.2,
+    "soCount": 2,
+    "customers": [
+      "ORMOND LIFESTYLE SERVICES SDN BHD"
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00260",
+        "customer": "ORMOND LIFESTYLE SERVICES SDN BHD",
+        "qty": 2,
+        "uom": "UNIT",
+        "date": "19/03/2026"
+      },
+      {
+        "soNo": "SO-00235",
+        "customer": "ORMOND LIFESTYLE SERVICES SDN BHD",
+        "qty": 2,
+        "uom": "UNIT",
+        "date": "16/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "CY-001",
+    "description": "CHILLI YIDU 1KG",
+    "uom": [
+      "PKT"
+    ],
+    "totalQty": 4,
+    "totalValue": 61.2,
+    "soCount": 2,
+    "customers": [
+      "ORMOND LIFESTYLE SERVICES SDN BHD"
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00260",
+        "customer": "ORMOND LIFESTYLE SERVICES SDN BHD",
+        "qty": 2,
+        "uom": "PKT",
+        "date": "19/03/2026"
+      },
+      {
+        "soNo": "SO-00235",
+        "customer": "ORMOND LIFESTYLE SERVICES SDN BHD",
+        "qty": 2,
+        "uom": "PKT",
+        "date": "16/03/2026"
+      }
+    ]
+  },
+  {
+    "itemCode": "AUSD-001",
+    "description": "AUSTRALIAN DHALL 1KG",
+    "uom": [
+      "UNIT"
+    ],
+    "totalQty": 6,
+    "totalValue": 21.0,
+    "soCount": 1,
+    "customers": [
+      "ORMOND LIFESTYLE SERVICES SDN BHD"
+    ],
+    "orders": [
+      {
+        "soNo": "SO-00235",
+        "customer": "ORMOND LIFESTYLE SERVICES SDN BHD",
+        "qty": 6,
+        "uom": "UNIT",
+        "date": "16/03/2026"
+      }
+    ]
+  }
+]
