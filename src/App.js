@@ -1932,7 +1932,7 @@ function App() {
           const totalColl = rows.reduce((s,r)=>s+r.collected,0);
           const totalOut  = rows.reduce((s,r)=>s+r.outstanding,0);
           return { rows, totalInv, totalColl, totalOut };
-}
+        })();
         const now = new Date();
         const currentMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
 
