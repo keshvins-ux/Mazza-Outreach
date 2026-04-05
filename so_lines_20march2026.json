@@ -1,0 +1,171 @@
+[
+  {
+    "soNo":"SO-00258","date":"19/03/2026","customer":"SAJIAN AMBANG SDN BHD",
+    "lines":[
+      {"itemCode":"PR-GHEE-0.9KG","description":"PURE GHEE 900G X 12 TIN","qty":5,"uom":"CTN","unitPrice":39.50,"subTotal":197.50},
+      {"itemCode":"GMM-002","description":"GARAM MASALA MIX 500GM","qty":10,"uom":"UNIT","unitPrice":46.00,"subTotal":460.00},
+      {"itemCode":"CF-002","description":"CHILLI FLAKES 1KG","qty":2,"uom":"UNIT","unitPrice":22.50,"subTotal":45.00},
+      {"itemCode":"DC-002","description":"DRIED CHILI (WRINKLE) 1KG","qty":20,"uom":"BAG","unitPrice":130.00,"subTotal":2600.00}
+    ],"netTotal":3302.50
+  },
+  {
+    "soNo":"SO-00260","date":"19/03/2026","customer":"ORMOND LIFESTYLE SERVICES SDN BHD",
+    "lines":[
+      {"itemCode":"CY-001","description":"CHILLI YIDU 1KG","qty":2,"uom":"PKT","unitPrice":15.30,"subTotal":30.60},
+      {"itemCode":"DC-002","description":"DRIED CHILI (WRINKLE) 1KG","qty":2,"uom":"UNIT","unitPrice":11.30,"subTotal":22.60},
+      {"itemCode":"MCP-002","description":"MEAT CURRY POWDER 1KG","qty":2,"uom":"UNIT","unitPrice":19.80,"subTotal":39.60},
+      {"itemCode":"FCP-002","description":"FISH CURRY POWDER 1KG","qty":2,"uom":"UNIT","unitPrice":19.80,"subTotal":39.60},
+      {"itemCode":"PCO-008","description":"PALM COOKING OIL 17KG","qty":5,"uom":"UNIT","unitPrice":91.50,"subTotal":457.50}
+    ],"netTotal":589.90
+  },
+  {
+    "soNo":"SO-00253","date":"18/03/2026","customer":"KAMPONG KRAVERS (M) SDN BHD",
+    "lines":[
+      {"itemCode":"MSD","description":"MASOOR DHALL","qty":14,"uom":"BAG","unitPrice":75.00,"subTotal":1050.00},
+      {"itemCode":"CSN-CR","description":"CASHEW NUT (CRUSHED) 1KG","qty":20,"uom":"UNIT","unitPrice":20.00,"subTotal":400.00}
+    ],"netTotal":1450.00
+  },
+  {
+    "soNo":"SO-00254","date":"18/03/2026","customer":"S ONE ONE F&B SDN. BHD.",
+    "lines":[
+      {"itemCode":"MCP-002","description":"MEAT CURRY POWDER 1KG","qty":5,"uom":"CTN","unitPrice":198.00,"subTotal":990.00},
+      {"itemCode":"MCP-004","description":"MEAT CURRY POWDER 3KG","qty":10,"uom":"CTN","unitPrice":297.00,"subTotal":2970.00},
+      {"itemCode":"TP-001","description":"TURMERIC POWDER 1KG","qty":5,"uom":"CTN","unitPrice":188.00,"subTotal":940.00},
+      {"itemCode":"CP-002","description":"CHILLI POWDER 1KG","qty":6,"uom":"CTN","unitPrice":244.00,"subTotal":1464.00},
+      {"itemCode":"BPS-002","description":"BLACK PEPPER SEED 500GM","qty":2,"uom":"CTN","unitPrice":300.00,"subTotal":600.00},
+      {"itemCode":"CRP-002","description":"CORIANDER POWDER 250GM","qty":1,"uom":"CTN","unitPrice":152.00,"subTotal":152.00}
+    ],"netTotal":7116.00
+  },
+  {
+    "soNo":"SO-00256","date":"18/03/2026","customer":"ACETREND CORPORATION SDN BHD",
+    "lines":[
+      {"itemCode":"DC-002","description":"DRIED CHILI (WRINKLE) 1KG","qty":2,"uom":"UNIT","unitPrice":23.00,"subTotal":46.00}
+    ],"netTotal":46.00
+  },
+  {
+    "soNo":"SO-00257","date":"18/03/2026","customer":"SUNTRACO FOOD INDUSTRIES SDN BHD",
+    "lines":[
+      {"itemCode":"DC-004","description":"DRIED CHILI 688","qty":200,"uom":"BAG","unitPrice":125.00,"subTotal":25000.00}
+    ],"netTotal":25000.00
+  },
+  {
+    "soNo":"SO-00242","date":"17/03/2026","customer":"OZVENTURES TRADING SDN. BHD.",
+    "lines":[
+      {"itemCode":"CSM-001","description":"CHICKEN SEASONING MIX 1KG","qty":40,"uom":"UNIT","unitPrice":27.50,"subTotal":1100.00},
+      {"itemCode":"BFS-001","description":"BEEF SEASONING MIX 1KG","qty":30,"uom":"UNIT","unitPrice":23.85,"subTotal":715.50}
+    ],"netTotal":1815.50
+  },
+  {
+    "soNo":"SO-00243","date":"17/03/2026","customer":"AN NUUR FOOD INDUSTRIES SDN BHD",
+    "lines":[
+      {"itemCode":"FS-001","description":"FENNEL SEED 1KG","qty":850,"uom":"UNIT","unitPrice":5.50,"subTotal":4675.00},
+      {"itemCode":"CMS-001","description":"CUMIN SEED 1KG","qty":500,"uom":"UNIT","unitPrice":14.00,"subTotal":7000.00},
+      {"itemCode":"CRS-001","description":"CORIANDER SEED 1KG","qty":500,"uom":"UNIT","unitPrice":5.50,"subTotal":2750.00},
+      {"itemCode":"CP-002","description":"CHILLI POWDER 1KG","qty":60,"uom":"UNIT","unitPrice":19.50,"subTotal":1170.00}
+    ],"netTotal":15595.00
+  },
+  {
+    "soNo":"SO-00245","date":"17/03/2026","customer":"KAMPONG KRAVERS (M) SDN BHD",
+    "lines":[
+      {"itemCode":"MSD","description":"MASOOR DHALL","qty":14,"uom":"BAG","unitPrice":75.00,"subTotal":1050.00},
+      {"itemCode":"BPC-001","description":"BLACK PEPPER COARSE 1KG","qty":2,"uom":"UNIT","unitPrice":48.00,"subTotal":96.00},
+      {"itemCode":"GN","description":"GROUND NUT","qty":1,"uom":"BAG","unitPrice":200.00,"subTotal":200.00},
+      {"itemCode":"FS-001","description":"FENNEL SEED 1KG","qty":5,"uom":"UNIT","unitPrice":12.50,"subTotal":62.50},
+      {"itemCode":"MS-001","description":"MUSTARD SEEDS 1KG","qty":2,"uom":"UNIT","unitPrice":6.00,"subTotal":12.00},
+      {"itemCode":"BPC-003","description":"BLACK PEPPER CRUSH 1KG","qty":2,"uom":"UNIT","unitPrice":50.00,"subTotal":100.00}
+    ],"netTotal":1520.50
+  },
+  {
+    "soNo":"SO-00246","date":"17/03/2026","customer":"SAJIAN AMBANG SDN BHD",
+    "lines":[
+      {"itemCode":"PCO-17KG","description":"PALM COOKING OIL 17KG","qty":160,"uom":"UNIT","unitPrice":92.00,"subTotal":14720.00}
+    ],"netTotal":14720.00
+  },
+  {
+    "soNo":"SO-00235","date":"16/03/2026","customer":"ORMOND LIFESTYLE SERVICES SDN BHD",
+    "lines":[
+      {"itemCode":"DC-002","description":"DRIED CHILI (WRINKLE) 1KG","qty":2,"uom":"UNIT","unitPrice":11.30,"subTotal":22.60},
+      {"itemCode":"CY-001","description":"CHILLI YIDU 1KG","qty":2,"uom":"PKT","unitPrice":15.30,"subTotal":30.60},
+      {"itemCode":"AUSD-001","description":"AUSTRALIAN DHALL 1KG","qty":6,"uom":"UNIT","unitPrice":3.50,"subTotal":21.00},
+      {"itemCode":"MCP-002","description":"MEAT CURRY POWDER 1KG","qty":4,"uom":"UNIT","unitPrice":19.80,"subTotal":79.20},
+      {"itemCode":"FCP-002","description":"FISH CURRY POWDER 1KG","qty":2,"uom":"UNIT","unitPrice":19.80,"subTotal":39.60},
+      {"itemCode":"TP-001","description":"TURMERIC POWDER 1KG","qty":2,"uom":"UNIT","unitPrice":19.80,"subTotal":39.60}
+    ],"netTotal":232.60
+  },
+  {
+    "soNo":"SO-00237","date":"16/03/2026","customer":"ILHAM INTEGRASI SDN BHD",
+    "lines":[
+      {"itemCode":"CP-002","description":"CHILLI POWDER 1KG","qty":10,"uom":"UNIT","unitPrice":24.40,"subTotal":244.00},
+      {"itemCode":"CRP-001","description":"CORIANDER POWDER 1KG","qty":10,"uom":"UNIT","unitPrice":15.20,"subTotal":152.00},
+      {"itemCode":"CMP-001","description":"CUMIN POWDER 1KG","qty":10,"uom":"UNIT","unitPrice":46.00,"subTotal":460.00},
+      {"itemCode":"PP-002","description":"PAPRIKA POWDER 1KG","qty":10,"uom":"UNIT","unitPrice":30.00,"subTotal":300.00},
+      {"itemCode":"TP-001","description":"TURMERIC POWDER 1KG","qty":30,"uom":"UNIT","unitPrice":19.80,"subTotal":594.00}
+    ],"netTotal":1750.00
+  },
+  {
+    "soNo":"SO-00239","date":"16/03/2026","customer":"MH DELIGHT SDN BHD",
+    "lines":[
+      {"itemCode":"CP-002","description":"CHILLI POWDER 1KG","qty":10,"uom":"UNIT","unitPrice":24.40,"subTotal":244.00},
+      {"itemCode":"FSS-004","description":"FIVE SPICE 300GM","qty":50,"uom":"UNIT","unitPrice":14.40,"subTotal":720.00}
+    ],"netTotal":964.00
+  },
+  {
+    "soNo":"SO-00241","date":"16/03/2026","customer":"RESTORAN INDIA GATE SDN. BHD.",
+    "lines":[
+      {"itemCode":"CDM-001","description":"CARDAMOM 1KG","qty":50,"uom":"UNIT","unitPrice":149.00,"subTotal":7450.00},
+      {"itemCode":"BPS-001","description":"BLACK PEPPER SEED 1KG","qty":50,"uom":"UNIT","unitPrice":33.00,"subTotal":1650.00},
+      {"itemCode":"CNS-001","description":"CINNAMON STICK 1KG","qty":20,"uom":"UNIT","unitPrice":25.00,"subTotal":500.00},
+      {"itemCode":"SA-001","description":"STAR ANISE 1KG","qty":20,"uom":"UNIT","unitPrice":20.00,"subTotal":400.00},
+      {"itemCode":"DC-002","description":"DRIED CHILI (WRINKLE) 1KG","qty":50,"uom":"UNIT","unitPrice":16.00,"subTotal":800.00},
+      {"itemCode":"CRS-001","description":"CORIANDER SEED 1KG","qty":25,"uom":"UNIT","unitPrice":5.80,"subTotal":145.00},
+      {"itemCode":"FS-001","description":"FENNEL SEED 1KG","qty":25,"uom":"UNIT","unitPrice":5.90,"subTotal":147.50},
+      {"itemCode":"MS-001","description":"MUSTARD SEEDS 1KG","qty":25,"uom":"UNIT","unitPrice":5.00,"subTotal":125.00},
+      {"itemCode":"CMP-001","description":"CUMIN POWDER 1KG","qty":50,"uom":"UNIT","unitPrice":33.00,"subTotal":1650.00},
+      {"itemCode":"CRP-001","description":"CORIANDER POWDER 1KG","qty":50,"uom":"UNIT","unitPrice":13.20,"subTotal":660.00},
+      {"itemCode":"CP-002","description":"CHILLI POWDER 1KG","qty":100,"uom":"UNIT","unitPrice":20.50,"subTotal":2050.00},
+      {"itemCode":"AUSD-002","description":"AUSTRALIAN DHALL 5KG","qty":100,"uom":"BAG","unitPrice":11.75,"subTotal":1175.00}
+    ],"netTotal":16752.50
+  },
+  {
+    "soNo":"SO-00252","date":"16/03/2026","customer":"Q & A FOOD RESOURCES SDN BHD",
+    "lines":[
+      {"itemCode":"PCO-17KG","description":"PALM COOKING OIL 17KG","qty":300,"uom":"UNIT","unitPrice":89.00,"subTotal":26700.00}
+    ],"netTotal":26700.00
+  },
+  {
+    "soNo":"SO-00216","date":"11/03/2026","customer":"SAUCE EMPIRE MANUFACTURING SDN BHD",
+    "lines":[
+      {"itemCode":"CP-002","description":"CHILLI POWDER 1KG","qty":30,"uom":"CTN","unitPrice":190.50,"subTotal":5715.00},
+      {"itemCode":"CF-002","description":"CHILLI FLAKES 1KG","qty":10,"uom":"CARTON","unitPrice":190.50,"subTotal":1905.00},
+      {"itemCode":"MCP-002","description":"MEAT CURRY POWDER 1KG","qty":15,"uom":"CTN","unitPrice":181.00,"subTotal":2715.00}
+    ],"netTotal":10335.00
+  },
+  {
+    "soNo":"SO-00210","date":"10/03/2026","customer":"SPICES & SEASONINGS SPECIALITIES SDN. BHD.",
+    "lines":[
+      {"itemCode":"MCP-005","description":"MEAT CURRY POWDER (S&S)","qty":80,"uom":"CTN","unitPrice":356.00,"subTotal":28480.00}
+    ],"netTotal":28480.00
+  },
+  {
+    "soNo":"SO-00192","date":"06/03/2026","customer":"AGRO 19 BERHAD",
+    "lines":[
+      {"itemCode":"MCP-003","description":"MEAT CURRY POWDER 250GM","qty":100,"uom":"CARTON","unitPrice":160.00,"subTotal":16000.00},
+      {"itemCode":"FCP-003","description":"FISH CURRY POWDER 250GM","qty":100,"uom":"CARTON","unitPrice":160.00,"subTotal":16000.00},
+      {"itemCode":"CP-004","description":"CHILLI POWDER 125GM","qty":100,"uom":"CARTON","unitPrice":200.00,"subTotal":20000.00},
+      {"itemCode":"TP-003","description":"TURMERIC POWDER 125GM","qty":100,"uom":"CARTON","unitPrice":168.00,"subTotal":16800.00}
+    ],"netTotal":68800.00
+  },
+  {
+    "soNo":"SO-00182","date":"05/03/2026","customer":"SAUCE EMPIRE MANUFACTURING SDN BHD",
+    "lines":[
+      {"itemCode":"CP-002","description":"CHILLI POWDER 1KG","qty":30,"uom":"CTN","unitPrice":190.50,"subTotal":5715.00},
+      {"itemCode":"MCP-002","description":"MEAT CURRY POWDER 1KG","qty":40,"uom":"CTN","unitPrice":181.00,"subTotal":7240.00}
+    ],"netTotal":12955.00
+  },
+  {
+    "soNo":"SO-00021","date":"13/01/2026","customer":"SPICES & SEASONING SPECIALIST SDN BHD",
+    "lines":[
+      {"itemCode":"MCP-005","description":"MEAT CURRY POWDER (S&S) 20KG","qty":60,"uom":"CARTON","unitPrice":356.00,"subTotal":21360.00}
+    ],"netTotal":21360.00
+  }
+]
