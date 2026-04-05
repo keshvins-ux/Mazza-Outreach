@@ -1237,8 +1237,10 @@ function App() {
   const [drawer, setDrawer] = useState(null); // {type, title, data, columns}
   const [soSearch, setSoSearch] = useState("");
   const [soFilter, setSoFilter] = useState("All");
+  const [soMonth,  setSoMonth]  = useState("All");
   const dropRef = useRef(null);
   const [leadsView, setLeadsView] = useState("pipeline"); // pipeline | copilot
+  const [analyticsView, setAnalyticsView] = useState("growth"); // growth | exec
   const [poSubTab, setPoSubTab] = useState("intake"); // intake | tracker
 
   // Log an activity entry
