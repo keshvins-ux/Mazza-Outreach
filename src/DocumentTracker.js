@@ -22,7 +22,7 @@ function CreateDocPanel({ entry, onDone, onClose }) {
     itemcode: "MISC", description: entry.description || "Sales Order Items",
     qty: 1, unitprice: entry.amount || 0, amount: entry.amount || 0, uom: "UNIT",
   }];
-  const payload = { soDocno: entry.soNo, customerCode: entry.customerCode || entry.soNo, deliveryDate, items, note };
+  const payload = { soDocno: entry.soNo, customerCode: entry.customerCode || null, customerName: entry.customer || entry.customerName || null, soDockey: entry.dockey || null, deliveryDate, items, note };
 
   async function createDO() {
     setCreating(true); setError("");
