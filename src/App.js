@@ -530,7 +530,7 @@ ${poText}` }];
         docdate: today,
         description: "Sales Order via PO Intake",
         docref1: extracted.poNumber||"",
-        docref2: extracted.deliveryDate ? "DELIVERY DATE: "+extracted.deliveryDate.split("-").reverse().join("/") : "",
+        docref2: extracted.deliveryDate ? "DD: "+extracted.deliveryDate.split("-").reverse().join("/") : "",
         note: extracted.notes||"",
         sdsdocdetail: editedItems.filter(i=>i.itemcode).map((item,idx)=>({
           itemcode: item.itemcode,
@@ -2219,7 +2219,7 @@ function App() {
                           </div>
                           <div style={{textAlign:"right",flexShrink:0,marginLeft:8}}>
                             <div style={{fontSize:12,fontWeight:800,color:"#EF4444"}}>RM {s.amount.toLocaleString()}</div>
-                            <div style={{fontSize:10,color:"#94A3B8"}}>{s.delivery.replace("DELIVERY DATE: ","")}</div>
+                            <div style={{fontSize:10,color:"#94A3B8"}}>{s.delivery.replace("DD: ","").replace("DELIVERY DATE: ","")}
                           </div>
                         </div>
                       );
@@ -2328,7 +2328,7 @@ function App() {
                           <td style={{padding:"10px 16px",color:"#374151",maxWidth:200,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{s.customer}</td>
                           <td style={{padding:"10px 16px",fontWeight:700,color:"#0F172A",whiteSpace:"nowrap"}}>RM {s.amount.toLocaleString()}</td>
                           <td style={{padding:"10px 16px",color:"#64748B",whiteSpace:"nowrap"}}>{s.date}</td>
-                          <td style={{padding:"10px 16px",color:isLate?"#EF4444":"#64748B",fontWeight:isLate?700:400,whiteSpace:"nowrap",fontSize:11}}>{isLate?"⚠️ ":""}{s.delivery!=="-"?s.delivery.replace("DELIVERY DATE: ",""):"-"}</td>
+                          <td style={{padding:"10px 16px",color:isLate?"#EF4444":"#64748B",fontWeight:isLate?700:400,whiteSpace:"nowrap",fontSize:11}}>{isLate?"⚠️ ":""}s.delivery!=="-"?s.delivery.replace("DD: ","").replace("DELIVERY DATE: ",""):"-"
                           <td style={{padding:"10px 16px"}}>
                             <span style={{fontSize:10,padding:"3px 10px",borderRadius:20,background:`${SO_STATUS_COLOR(s.status)}18`,color:SO_STATUS_COLOR(s.status),fontWeight:700}}>{s.status||"Active"}</span>
                           </td>
