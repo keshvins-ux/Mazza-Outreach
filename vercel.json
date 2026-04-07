@@ -3,5 +3,23 @@
     "api/*.js": {
       "maxDuration": 60
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/sync-master",
+      "schedule": "0 1 * * *"
+    },
+    {
+      "path": "/api/sync-so",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/sync-invoices",
+      "schedule": "*/20 * * * *"
+    },
+    {
+      "path": "/api/sync-dos",
+      "schedule": "*/20 * * * *"
+    }
+  ]
 }
