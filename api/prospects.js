@@ -26,21 +26,30 @@ export default async function handler(req, res) {
       }
 
       if (type === "so") {
-        // Full SO + invoice + DO data for Document Tracker
-        const [soRaw, ivRaw, doRaw] = await Promise.all([
+        // Full SO + invoice + DO data for Document Tracker and sales dashboard
+        const [soRaw, ivRaw, doRaw, rvRaw, updatedRaw] = await Promise.all([
           client.get('mazza_so'),
           client.get('mazza_invoice'),
           client.get('mazza_do'),
+          client.get('mazza_rv'),
+          client.get('mazza_so_updated'),
         ]);
         const soList = soRaw ? JSON.parse(soRaw) : [];
         const ivList = ivRaw ? JSON.parse(ivRaw) : [];
         const doList = doRaw ? JSON.parse(doRaw) : [];
-        // Only return active/open SOs
+        const rvList = rvRaw ? JSON.parse(rvRaw) : [];
+        // Only return active/open SOs (id = "SO-00320" string after sync-so fix)
         const openSOs = soList.filter(s => {
           const st = (s.status||'').toUpperCase();
           return !st.startsWith('DONE') && !st.startsWith('CANCEL') && st !== 'CANCELLED';
         });
-        return res.status(200).json({ so: openSOs, invoice: ivList, dos: doList });
+        return res.status(200).json({
+          so:      openSOs,
+          invoice: ivList,
+          dos:     doList,
+          rv:      rvList,
+          updated: updatedRaw || null,
+        });
       }
 
       if (type === "so_legacy") {

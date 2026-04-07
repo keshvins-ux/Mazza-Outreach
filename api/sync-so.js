@@ -103,15 +103,16 @@ export default async function handler(req, res) {
 
     // ── 2. Map with confirmed field names ─────────────────────────────────
     const allSOs = rawSOs.map(so => ({
-      id:              so.dockey,
-      docNo:           so.docno,
+      id:              so.docno,             // "SO-00320" — primary identifier used by frontend
+      dockey:          so.dockey,            // integer — used for SQL Account API calls only
+      docNo:           so.docno,             // kept for backward compat
       customer:        so.companyname || so.code,
       customerCode:    so.code,
       date:            so.docdate,
-      deliveryDate:    so.deliverydate || null,
-      deliveryDateRef: so.docref2 || null,  // "DELIVERY DATE: 06/04/2026"
-      poRef:           so.docref1 || null,  // customer PO number
-      statusNote:      so.docref3 || null,  // "DONE" when fulfilled
+      delivery:        so.docref2 || null,   // "DD: 06/04/2026" — field name App.js expects
+      deliveryDateRef: so.docref2 || null,   // kept for backward compat
+      poRef:           so.docref1 || null,   // customer PO number
+      statusNote:      so.docref3 || null,   // "DONE" when fulfilled
       status:          mapStatus(so),
       statusRaw:       so.status,
       amount:          parseFloat(so.docamt || 0),
@@ -121,7 +122,7 @@ export default async function handler(req, res) {
     }));
 
     // ── 3. Filter to truly active/open SOs only ───────────────────────────
-    const activeSOs = allSOs.filter(so => isActiveSO(rawSOs.find(r => r.dockey === so.id)));
+    const activeSOs = allSOs.filter(so => isActiveSO(rawSOs.find(r => r.dockey === so.dockey)));
 
     // Store both full list and active-only list
     await redis.set('mazza_so',          JSON.stringify(allSOs));

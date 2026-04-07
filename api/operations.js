@@ -106,7 +106,13 @@ export default async function handler(req, res) {
     const doList  = doRaw      ? JSON.parse(doRaw)      : [];
 
     const liveStatus = {};
-    soLive.forEach(s => { liveStatus[s.id] = s.status||'Active'; });
+    soLive.forEach(s => {
+      // Index by both the SO number string (s.id = "SO-00320") and dockey integer
+      // so:by_product stores orders with soNo = docNo string
+      liveStatus[s.id]     = s.status||'Active';  // "SO-00320" -> status
+      liveStatus[s.dockey] = s.status||'Active';  // 8 -> status (backward compat)
+      if (s.docNo) liveStatus[s.docNo] = s.status||'Active'; // extra safety
+    });
 
     // Build set of SO numbers that are fulfilled — i.e. a DO exists for that SO.
     // Since soRef on DOs contains customer PO numbers (not SO docnos), we match

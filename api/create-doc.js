@@ -555,8 +555,17 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: errMsg || 'Failed to create DO' });
       }
 
-      const docno  = data.docno || data.DocNo || data.id || 'DO-NEW';
+      const docno  = data.docno || data.DocNo || data.id || null;
       const dockey = data.dockey || data.DocKey || null;
+
+      // Explicit validation — never silently succeed without a document number
+      if (!docno) {
+        console.error('DO created but no docno returned:', JSON.stringify(data));
+        return res.status(500).json({
+          error: 'DO may have been created in SQL Account but no document number was returned. Please check SQL Account manually before retrying.',
+          rawResponse: data,
+        });
+      }
 
       // Update OCC log — append to doList array (supports multiple DOs per SO)
       if (soDocno) {
