@@ -186,6 +186,7 @@ export default function DocumentTracker() {
   // OCC-logged entries
   const occEntries = occ.map(e => ({
     soNo:         e.docno || "—",
+    dockey:       e.dockey || null,          // for partial DO balance checks
     customer:     e.customerName || "—",
     customerCode: e.customerCode || null,
     poRef:        e.poNumber || "—",
@@ -193,6 +194,7 @@ export default function DocumentTracker() {
     date:         e.submittedAt,
     invoiceNo:    e.invoiceNo || invoiceMap[e.docno] || null,
     doNo:         e.doNo || doMap[e.docno] || null,
+    doList:       e.doList || [],            // all partial DOs for this SO
     deliveryDate: e.deliveryDate || null,
     submittedBy:  e.submittedBy || "—",
     items:        e.items || [],
@@ -200,19 +202,21 @@ export default function DocumentTracker() {
   }));
 
   // SQL-only SOs
+  // Note: after sync-so.js fix, so.id = "SO-00320" (docNo string), so.dockey = integer
   const occSoNos = new Set(occ.map(e=>e.docno).filter(Boolean));
   const sqlOnlyEntries = allSOs
     .filter(so => !occSoNos.has(so.id) && so.status !== "Cancelled" && !so.status?.toUpperCase().startsWith("DONE"))
     .map(so => ({
-      soNo:         so.id,
+      soNo:         so.id,                                  // "SO-00320" string
+      dockey:       so.dockey || null,                      // integer for API calls
       customer:     so.customer || "—",
-      customerCode: so.code || null,
-      poRef:        "—",
+      customerCode: so.customerCode || null,                // fixed: was so.code (wrong field)
+      poRef:        so.poRef || "—",
       amount:       so.amount || 0,
       date:         so.date,
       invoiceNo:    invoiceMap[so.id] || null,
       doNo:         doMap[so.id] || null,
-      deliveryDate: so.delivery || null,
+      deliveryDate: so.delivery || so.deliveryDateRef || null,  // fixed: was so.delivery (missing field)
       submittedBy:  "SQL Account",
       items:        [],
       source:       "sql",

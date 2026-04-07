@@ -1961,9 +1961,14 @@ function App() {
         const totalOwed = overdueAmt+due30Amt+futureAmt||1;
 
         // -- Late SOs (delivery date passed, not DONE) ---------------------
+        // Helper: get delivery date string from SO, stripping known prefixes
+        const getSoDelivery = s => (s.delivery || s.deliveryDateRef || "-")
+          .replace("DD: ","").replace("DELIVERY DATE: ","").trim();
+
         const lateSOs = safeSoData.filter(s=>{
-          if (!s.delivery||s.delivery==="-") return false;
-          const m = s.delivery.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+          const del = getSoDelivery(s);
+          if (!del || del==="-") return false;
+          const m = del.match(/(\d{2})\/(\d{2})\/(\d{4})/);
           if (!m) return false;
           const delDate = new Date(`${m[3]}-${m[2]}-${m[1]}`);
           const status = String(s.status||"").toLowerCase();
@@ -1992,8 +1997,8 @@ function App() {
         // -- SO Table filtering --------------------------------------------
         const soMonths = [...new Set(safeSoData.map(s=>s.date?.slice(0,7)).filter(Boolean))].sort().reverse();
         const filteredSO = safeSoData.filter(s=>{
-          const matchSearch = (s.customer+s.id+s.agent).toLowerCase().includes(soSearch.toLowerCase());
-          const matchFilter = soFilter==="All" || String(s.status||"").toLowerCase().includes(soFilter.toLowerCase()) || (soFilter==="Late"&&lateSOs.find(l=>l.id===s.id));
+          const matchSearch = (s.customer+(s.id||s.docNo||"")+(s.agent||"")).toLowerCase().includes(soSearch.toLowerCase());
+          const matchFilter = soFilter==="All" || String(s.status||"").toLowerCase().includes(soFilter.toLowerCase()) || (soFilter==="Late"&&lateSOs.find(l=>l.id===s.id||l.docNo===s.id));
           const matchMonth  = soMonth==="All" || (s.date&&s.date.startsWith(soMonth));
           return matchSearch && matchFilter && matchMonth;
         });
@@ -2208,7 +2213,8 @@ function App() {
                 ) : (
                   <div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:220,overflowY:"auto"}}>
                     {lateSOs.slice(0,8).map(s=>{
-                      const m=s.delivery.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+                      const delStr=getSoDelivery(s);
+                      const m=delStr.match(/(\d{2})\/(\d{2})\/(\d{4})/);
                       const delDate=m?new Date(`${m[3]}-${m[2]}-${m[1]}`):null;
                       const daysLate=delDate?Math.floor((now-delDate)/(1000*60*60*24)):0;
                       return (
@@ -2219,7 +2225,7 @@ function App() {
                           </div>
                           <div style={{textAlign:"right",flexShrink:0,marginLeft:8}}>
                             <div style={{fontSize:12,fontWeight:800,color:"#EF4444"}}>RM {s.amount.toLocaleString()}</div>
-                            <div style={{fontSize:10,color:"#94A3B8"}}>{s.delivery.replace("DELIVERY DATE: ","")}</div>
+                            <div style={{fontSize:10,color:"#94A3B8"}}>{delStr}</div>
                           </div>
                         </div>
                       );
@@ -2321,14 +2327,14 @@ function App() {
                   </thead>
                   <tbody>
                     {filteredSO.slice(0,100).map((s,i)=>{
-                      const isLate = lateSOs.find(l=>l.id===s.id);
+                      const isLate = lateSOs.find(l=>l.id===s.id||l.id===(s.docNo||s.id));
                       return (
-                        <tr key={s.id} style={{borderTop:"1px solid #F1F5F9",background:isLate?"#FFF7F7":i%2===0?"#fff":"#FAFAFA"}}>
-                          <td style={{padding:"10px 16px",fontWeight:700,color:"#1E3A5F",whiteSpace:"nowrap"}}>{s.id}</td>
+                        <tr key={s.id||s.docNo} style={{borderTop:"1px solid #F1F5F9",background:isLate?"#FFF7F7":i%2===0?"#fff":"#FAFAFA"}}>
+                          <td style={{padding:"10px 16px",fontWeight:700,color:"#1E3A5F",whiteSpace:"nowrap"}}>{s.id||s.docNo}</td>
                           <td style={{padding:"10px 16px",color:"#374151",maxWidth:200,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{s.customer}</td>
                           <td style={{padding:"10px 16px",fontWeight:700,color:"#0F172A",whiteSpace:"nowrap"}}>RM {s.amount.toLocaleString()}</td>
                           <td style={{padding:"10px 16px",color:"#64748B",whiteSpace:"nowrap"}}>{s.date}</td>
-                          <td style={{padding:"10px 16px",color:isLate?"#EF4444":"#64748B",fontWeight:isLate?700:400,whiteSpace:"nowrap",fontSize:11}}>{isLate?"⚠️ ":""}{s.delivery!=="-"?s.delivery.replace("DELIVERY DATE: ",""):"-"}</td>
+                          <td style={{padding:"10px 16px",color:isLate?"#EF4444":"#64748B",fontWeight:isLate?700:400,whiteSpace:"nowrap",fontSize:11}}>{isLate?"⚠️ ":""}{getSoDelivery(s)!=="-"?getSoDelivery(s):"-"}</td>
                           <td style={{padding:"10px 16px"}}>
                             <span style={{fontSize:10,padding:"3px 10px",borderRadius:20,background:`${SO_STATUS_COLOR(s.status)}18`,color:SO_STATUS_COLOR(s.status),fontWeight:700}}>{s.status||"Active"}</span>
                           </td>
