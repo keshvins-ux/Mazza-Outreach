@@ -437,13 +437,15 @@ async function stepSalesOrders(page) {
       }
     } catch(e) {
       skipped++;
+      if (skipped <= 3) console.error('SO INSERT ERROR dockey='+r.dockey+':', e.message);
     }
   }
 
   const done = records.length < PAGE_SIZE;
   return {
     page, offset, upserted, skipped, lineCount,
-    done, nextPage: done ? null : page + 1, total
+    done, nextPage: done ? null : page + 1, total,
+    lastError: skipped > 0 ? 'Check Vercel logs for SO INSERT ERROR' : null
   };
 }
 
