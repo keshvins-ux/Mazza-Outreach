@@ -19,7 +19,8 @@
 //   GET /api/migrate?step=status&key=OCC_MIGRATE_2026  (check counts at any time)
 
 import crypto from 'crypto';
-import { Pool } from 'pg';
+import pkg from 'pg';
+const { Pool } = pkg;
 
 // ── AWS4 SIGNING (same as all other api/ files) ────────────────
 function sign(key, msg) {
@@ -239,18 +240,14 @@ async function stepSuppliers() {
   return { upserted, skipped, total: all.length, done: true };
 }
 
-async function stepStockItems() {
-  let all = [], offset = 0;
-  while (true) {
-    const { records } = await fetchPage('/stockitem', offset);
-    if (!records.length) break;
-    all = all.concat(records);
-    offset += PAGE_SIZE;
-    if (records.length < PAGE_SIZE) break;
-    if (all.length >= 500) break; // safety
-  }
+async function stepStockItems(page) {
+  const offset = page * PAGE_SIZE;
+  const { blocked, records, total } = await fetchPage('/stockitem', offset);
+  if (blocked) return { error: 'Blocked' };
+  if (!records.length) return { upserted: 0, skipped: 0, done: true, total };
+
   let upserted = 0, skipped = 0;
-  for (const r of all) {
+  for (const r of records) {
     try {
       await query(`
         INSERT INTO sql_stockitems (
@@ -289,21 +286,19 @@ async function stepStockItems() {
       upserted++;
     } catch(e) { skipped++; }
   }
-  return { upserted, skipped, total: all.length, done: true };
+
+  const done = records.length < PAGE_SIZE;
+  return { page, offset, upserted, skipped, done, nextPage: done ? null : page + 1, total };
 }
 
-async function stepAccounts() {
-  let all = [], offset = 0;
-  while (true) {
-    const { records } = await fetchPage('/account', offset);
-    if (!records.length) break;
-    all = all.concat(records);
-    offset += PAGE_SIZE;
-    if (records.length < PAGE_SIZE) break;
-    if (all.length >= 500) break;
-  }
+async function stepAccounts(page) {
+  const offset = page * PAGE_SIZE;
+  const { blocked, records, total } = await fetchPage('/account', offset);
+  if (blocked) return { error: 'Blocked' };
+  if (!records.length) return { upserted: 0, skipped: 0, done: true, total };
+
   let upserted = 0, skipped = 0;
-  for (const r of all) {
+  for (const r of records) {
     try {
       await query(`
         INSERT INTO sql_accounts (dockey,parent,code,description,description2,
@@ -318,7 +313,9 @@ async function stepAccounts() {
       upserted++;
     } catch(e) { skipped++; }
   }
-  return { upserted, skipped, total: all.length, done: true };
+
+  const done = records.length < PAGE_SIZE;
+  return { page, offset, upserted, skipped, done, nextPage: done ? null : page + 1, total };
 }
 
 // Generic paginated doc migration — SO, DO, INV, PO, PI, RV, SP, JE
@@ -1007,8 +1004,8 @@ export default async function handler(req, res) {
       case 'status':           result = await stepStatus(); break;
       case 'customers':        result = await stepCustomers(); break;
       case 'suppliers':        result = await stepSuppliers(); break;
-      case 'stockitems':       result = await stepStockItems(); break;
-      case 'accounts':         result = await stepAccounts(); break;
+      case 'stockitems':       result = await stepStockItems(page); break;
+      case 'accounts':         result = await stepAccounts(page); break;
       case 'salesorders':      result = await stepSalesOrders(page); break;
       case 'deliveryorders':   result = await stepDeliveryOrders(page); break;
       case 'salesinvoices':    result = await stepSalesInvoices(page); break;
