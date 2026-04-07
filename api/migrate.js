@@ -19,8 +19,7 @@
 //   GET /api/migrate?step=status&key=OCC_MIGRATE_2026  (check counts at any time)
 
 import crypto from 'crypto';
-import pkg from 'pg';
-const { Pool } = pkg;
+import { Pool } from 'pg';
 
 // ── AWS4 SIGNING (same as all other api/ files) ────────────────
 function sign(key, msg) {
