@@ -98,11 +98,14 @@ async function q(sql, params = []) {
 const safe = v => (v === undefined || v === null || v === '----' || v === '') ? null : v;
 const safeDate = v => (v && typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v)) ? v.slice(0, 10) : null;
 
+const _periodCache = {};
 async function getPeriodId(dateStr) {
   if (!dateStr) return null;
   const code = String(dateStr).slice(0, 7);
-  const r = await q('SELECT id FROM occ_periods WHERE period_code = $1', [code]);
-  return r.rows[0]?.id ?? null;
+  if (_periodCache[code] !== undefined) return _periodCache[code];
+  const r = await q(`SELECT id FROM occ_periods WHERE period_code = $1`, [code]);
+  _periodCache[code] = r.rows[0]?.id ?? null;
+  return _periodCache[code];
 }
 
 // ── SHARED HEADER INSERT (SO, DO, INV, PO, PI all share same header structure)
@@ -1053,6 +1056,12 @@ export default async function handler(req, res) {
   if (!process.env.DATABASE_URL) return res.status(500).json({ error: 'DATABASE_URL not set' });
 
   const page = parseInt(pageStr ?? '0');
+
+  // Pre-load all periods into cache — eliminates DB round trip per record
+  if (Object.keys(_periodCache).length === 0) {
+    const pr = await q(`SELECT id, period_code FROM occ_periods`);
+    for (const row of pr.rows) _periodCache[row.period_code] = row.id;
+  }
   const started = Date.now();
 
   try {
