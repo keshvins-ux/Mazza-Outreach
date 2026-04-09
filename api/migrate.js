@@ -404,6 +404,7 @@ async function stepSoLines(dockey) {
     const r = await q(`
       SELECT so.dockey FROM sql_salesorders so
       WHERE NOT EXISTS (SELECT 1 FROM sql_so_lines l WHERE l.dockey = so.dockey)
+      AND so.docamt != '0' AND so.docamt IS NOT NULL
       ORDER BY so.dockey LIMIT 20
     `);
     return { pending: r.rows.map(x => x.dockey), count: r.rows.length, done: r.rows.length === 0 };
@@ -535,6 +536,7 @@ async function stepDoLines(dockey) {
     const r = await q(`
       SELECT do_.dockey FROM sql_deliveryorders do_
       WHERE NOT EXISTS (SELECT 1 FROM sql_do_lines l WHERE l.dockey = do_.dockey)
+      AND do_.docamt != '0' AND do_.docamt IS NOT NULL
       ORDER BY do_.dockey LIMIT 20
     `);
     return { pending: r.rows.map(x => x.dockey), count: r.rows.length, done: r.rows.length === 0 };
@@ -675,6 +677,7 @@ async function stepInvLines(dockey) {
     const r = await q(`
       SELECT inv.dockey FROM sql_salesinvoices inv
       WHERE NOT EXISTS (SELECT 1 FROM sql_inv_lines l WHERE l.dockey = inv.dockey)
+      AND inv.docamt != '0' AND inv.docamt IS NOT NULL
       ORDER BY inv.dockey LIMIT 20
     `);
     return { pending: r.rows.map(x => x.dockey), count: r.rows.length, done: r.rows.length === 0 };
