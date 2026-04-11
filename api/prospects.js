@@ -234,8 +234,7 @@ export default async function handler(req, res) {
           source:  'postgres',  // flag so frontend knows data source
         });
       } catch(e) {
-        const pgError = e.message;
-        console.error('prospects so error:', pgError);
+        console.error('prospects so error:', e.message);
         // Fallback to Redis if Postgres fails
         const client = await getRedisClient();
         try {
@@ -253,7 +252,6 @@ export default async function handler(req, res) {
             rv:      rvRaw  ? JSON.parse(rvRaw)  : [],
             updated: updatedRaw || null,
             source:  'redis_fallback',
-            pg_error: pgError,
           });
         } finally {
           await client.disconnect();
