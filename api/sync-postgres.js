@@ -1,18 +1,15 @@
 // api/sync-postgres.js
 // OCC — Incremental Postgres Sync
-// Syncs 6 critical tables from SQL Account → Postgres
-// Uses lastmodified timestamp for incremental pulls — only fetches changed records
-// Runs every 15 min via Vercel cron
+// One table per call — called by separate crons or manually
 //
-// Tables synced:
-//   sql_salesorders      — every run
-//   sql_deliveryorders   — every run
-//   sql_salesinvoices    — every run
-//   sql_receiptvouchers  — every run
-//   sql_customers        — every 6th run (hourly)
-//   sql_stockitems       — every 6th run (hourly)
-//
-// Also updates SO lines (offsetqty) for any SO that changed
+// Usage:
+//   GET /api/sync-postgres?table=salesorders
+//   GET /api/sync-postgres?table=deliveryorders
+//   GET /api/sync-postgres?table=salesinvoices
+//   GET /api/sync-postgres?table=receiptvouchers
+//   GET /api/sync-postgres?table=customers
+//   GET /api/sync-postgres?table=stockitems
+//   GET /api/sync-postgres?table=status   (check last sync times)
 
 import crypto from 'crypto';
 import { Pool } from 'pg';
@@ -48,7 +45,7 @@ function buildHeaders(path, qs = '') {
   };
 }
 
-// ── FETCH HELPERS ──────────────────────────────────────────────
+// ── FETCH ──────────────────────────────────────────────────────
 async function fetchPage(endpoint, offset, limit = 50) {
   const qs = `limit=${limit}&offset=${offset}`;
   const res = await fetch(`${process.env.SQL_HOST}${endpoint}?${qs}`,
@@ -64,21 +61,6 @@ async function fetchPage(endpoint, offset, limit = 50) {
   } catch { return { blocked: false, records: [] }; }
 }
 
-// Fetch all pages — used for master data (small datasets)
-async function fetchAll(endpoint) {
-  let all = [], offset = 0;
-  while (true) {
-    const { blocked, records } = await fetchPage(endpoint, offset);
-    if (blocked || !records.length) break;
-    all = all.concat(records);
-    if (records.length < 50) break;
-    offset += 50;
-    if (all.length > 5000) break;
-  }
-  return all;
-}
-
-// Fetch SO/DO/INV detail for line items
 async function fetchDetail(endpoint, dockey) {
   const path = `${endpoint}/${dockey}`;
   const res = await fetch(`${process.env.SQL_HOST}${path}`,
@@ -107,31 +89,6 @@ async function q(sql, params = []) {
 const safe = v => (v === undefined || v === null || v === '----' || v === '') ? null : v;
 const safeDate = v => (v && typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v)) ? v.slice(0, 10) : null;
 
-// Get last sync timestamp for a table from occ_sync_log
-async function getLastSyncTime(syncType) {
-  const r = await q(`
-    SELECT last_lastmodified FROM occ_sync_log
-    WHERE sync_type = $1 AND status = 'SUCCESS'
-    ORDER BY completed_at DESC LIMIT 1
-  `, [syncType]);
-  return r.rows[0]?.last_lastmodified ?? null;
-}
-
-// Log sync result
-async function logSync(syncType, status, fetched, upserted, lastModified, errorMsg, startedAt) {
-  await q(`
-    INSERT INTO occ_sync_log
-      (sync_type, endpoint, started_at, completed_at, status,
-       records_fetched, records_upserted, last_lastmodified, error_message, duration_ms)
-    VALUES ($1,$2,$3,NOW(),$4,$5,$6,$7,$8,$9)
-  `, [
-    syncType, `/${syncType.toLowerCase()}`, startedAt, status,
-    fetched, upserted, lastModified, errorMsg,
-    Date.now() - startedAt.getTime()
-  ]);
-}
-
-// Get period_id from date string
 const _periodCache = {};
 async function getPeriodId(dateStr) {
   if (!dateStr) return null;
@@ -142,451 +99,435 @@ async function getPeriodId(dateStr) {
   return _periodCache[code];
 }
 
-// Pre-load periods into cache
 async function warmPeriodCache() {
+  if (Object.keys(_periodCache).length > 0) return;
   const r = await q('SELECT id, period_code FROM occ_periods');
   for (const row of r.rows) _periodCache[row.period_code] = row.id;
 }
 
-// ── SYNC FUNCTIONS ─────────────────────────────────────────────
+// Get last successful sync lastmodified for a table
+async function getLastModified(syncType) {
+  const r = await q(`
+    SELECT last_lastmodified FROM occ_sync_log
+    WHERE sync_type = $1 AND status = 'SUCCESS'
+    ORDER BY completed_at DESC LIMIT 1
+  `, [syncType]);
+  return r.rows[0]?.last_lastmodified ?? null;
+}
+
+async function logSync(syncType, status, fetched, upserted, lastMod, error, startedAt) {
+  try {
+    await q(`
+      INSERT INTO occ_sync_log
+        (sync_type, endpoint, started_at, completed_at, status,
+         records_fetched, records_upserted, last_lastmodified, error_message, duration_ms)
+      VALUES ($1,$2,$3,NOW(),$4,$5,$6,$7,$8,$9)
+    `, [
+      syncType, `/${syncType.toLowerCase()}`, startedAt, status,
+      fetched, upserted, lastMod, error,
+      Date.now() - startedAt.getTime()
+    ]);
+  } catch(e) { console.error('logSync failed:', e.message); }
+}
 
 // ── SALES ORDERS ──────────────────────────────────────────────
-async function syncSalesOrders(lastModified) {
+async function syncSalesOrders() {
   const started = new Date();
-  let fetched = 0, upserted = 0, maxLastModified = lastModified ?? 0;
-  const changedDockets = []; // track which SOs changed for line update
+  const lastMod = await getLastModified('SALESORDERS');
+  let fetched = 0, upserted = 0, maxMod = lastMod ?? 0;
+  const changed = [];
 
-  try {
-    let offset = 0;
-    while (true) {
-      const { blocked, records } = await fetchPage('/salesorder', offset);
-      if (blocked) { await logSync('SALESORDERS', 'FAILED', fetched, upserted, maxLastModified, 'Blocked', started); return; }
-      if (!records.length) break;
+  let offset = 0;
+  while (true) {
+    const { blocked, records } = await fetchPage('/salesorder', offset);
+    if (blocked) { await logSync('SALESORDERS','FAILED',fetched,upserted,maxMod,'Blocked',started); return { error:'Blocked' }; }
+    if (!records.length) break;
 
-      for (const r of records) {
-        fetched++;
-        // Skip if not changed since last sync
-        if (lastModified && r.lastmodified && r.lastmodified <= lastModified) continue;
-
-        try {
-          const pid = await getPeriodId(r.docdate);
-          await q(`
-            INSERT INTO sql_salesorders (
-              dockey,docno,docnoex,docdate,postdate,taxdate,
-              code,companyname,address1,address2,address3,address4,
-              postcode,city,state,country,phone1,mobile,fax1,attention,
-              area,agent,project,terms,currencycode,currencyrate,
-              shipper,description,cancelled,status,docamt,localdocamt,
-              d_docno,d_paymentmethod,d_chequenumber,d_paymentproject,
-              d_bankcharge,d_bankchargeaccount,d_amount,
-              validity,deliveryterm,cc,docref1,docref2,docref3,docref4,
-              branchname,daddress1,daddress2,daddress3,daddress4,
-              dpostcode,dcity,dstate,dcountry,dattention,dphone1,dmobile,dfax1,
-              taxexemptno,salestaxno,servicetaxno,tin,idtype,idno,
-              tourismno,sic,incoterms,submissiontype,peppol_uuid,businessunit,
-              attachments,note,approvestate,transferable,updatecount,printcount,
-              sql_lastmodified,occ_period_id,occ_synced_at,sql_raw
-            ) VALUES (
-              $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
-              $11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-              $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,
-              $31,$32,$33,$34,$35,$36,$37,$38,$39,$40,
-              $41,$42,$43,$44,$45,$46,$47,$48,$49,$50,
-              $51,$52,$53,$54,$55,$56,$57,$58,$59,$60,
-              $61,$62,$63,$64,$65,$66,$67,$68,$69,$70,
-              $71,$72,$73,$74,$75,$76,$77,$78,$79,NOW(),$80
-            )
-            ON CONFLICT (dockey) DO UPDATE SET
-              status=EXCLUDED.status,docamt=EXCLUDED.docamt,cancelled=EXCLUDED.cancelled,
-              docref1=EXCLUDED.docref1,docref2=EXCLUDED.docref2,docref3=EXCLUDED.docref3,
-              updatecount=EXCLUDED.updatecount,companyname=EXCLUDED.companyname,
-              sql_lastmodified=EXCLUDED.sql_lastmodified,occ_synced_at=NOW(),
-              sql_raw=EXCLUDED.sql_raw
-            WHERE sql_salesorders.sql_lastmodified IS NULL
-               OR EXCLUDED.sql_lastmodified > sql_salesorders.sql_lastmodified
-          `, [
-            r.dockey,safe(r.docno),safe(r.docnoex),safeDate(r.docdate),
-            safeDate(r.postdate),safeDate(r.taxdate),
-            safe(r.code),safe(r.companyname),safe(r.address1),safe(r.address2),
-            safe(r.address3),safe(r.address4),safe(r.postcode),safe(r.city),
-            safe(r.state),safe(r.country),safe(r.phone1),safe(r.mobile),
-            safe(r.fax1),safe(r.attention),safe(r.area),safe(r.agent),
-            safe(r.project),safe(r.terms),safe(r.currencycode),safe(r.currencyrate),
-            safe(r.shipper),safe(r.description),r.cancelled??false,r.status??null,
-            safe(r.docamt),safe(r.localdocamt),safe(r.d_docno),safe(r.d_paymentmethod),
-            safe(r.d_chequenumber),safe(r.d_paymentproject),safe(r.d_bankcharge),
-            safe(r.d_bankchargeaccount),safe(r.d_amount),safe(r.validity),
-            safe(r.deliveryterm),safe(r.cc),
-            safe(r.docref1),safe(r.docref2),safe(r.docref3),safe(r.docref4),
-            safe(r.branchname),safe(r.daddress1),safe(r.daddress2),safe(r.daddress3),
-            safe(r.daddress4),safe(r.dpostcode),safe(r.dcity),safe(r.dstate),
-            safe(r.dcountry),safe(r.dattention),safe(r.dphone1),safe(r.dmobile),
-            safe(r.dfax1),safe(r.taxexemptno),safe(r.salestaxno),safe(r.servicetaxno),
-            safe(r.tin),r.idtype??null,safe(r.idno),safe(r.tourismno),
-            safe(r.sic),safe(r.incoterms),r.submissiontype??null,
-            safe(r.peppol_uuid),safe(r.businessunit),
-            r.attachments?JSON.stringify(r.attachments):null,
-            safe(r.note),safe(r.approvestate),r.transferable??null,
-            r.updatecount??null,r.printcount??null,r.lastmodified??null,
-            pid,JSON.stringify(r),
-          ]);
-          upserted++;
-          changedDockets.push(r.dockey);
-          if (r.lastmodified && r.lastmodified > maxLastModified) maxLastModified = r.lastmodified;
-        } catch(e) {
-          console.error('SO sync error dockey='+r.dockey+':', e.message.slice(0,100));
-        }
-      }
-
-      if (records.length < 50) break;
-      offset += 50;
-      if (offset > 20000) break; // safety cap
-    }
-
-    // Update SO lines for changed SOs (offsetqty is critical for delivery tracking)
-    // Only do up to 10 per sync run to stay within 60s limit
-    const dockeysToUpdate = changedDockets.slice(0, 10);
-    for (const dockey of dockeysToUpdate) {
+    for (const r of records) {
+      fetched++;
+      if (lastMod && r.lastmodified && r.lastmodified <= lastMod) continue;
       try {
-        const detail = await fetchDetail('/salesorder', dockey);
-        if (!detail?.sdsdocdetail?.length) continue;
-        for (const line of detail.sdsdocdetail) {
-          await q(`
-            INSERT INTO sql_so_lines (
-              dtlkey,dockey,seq,styleid,number,itemcode,location,batch,
-              project,description,description2,description3,permitno,
-              qty,uom,rate,sqty,suomqty,offsetqty,unitprice,deliverydate,
-              disc,tax,tariff,taxexemptionreason,irbm_classification,
-              taxrate,taxamt,localtaxamt,exempted_taxrate,exempted_taxamt,
-              taxinclusive,amount,localamount,amountwithtax,printable,
-              fromdoctype,fromdockey,fromdtlkey,transferable,
-              remark1,remark2,companyitemcode,initialpurchasecost,changed
-            ) VALUES (
-              $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
-              $18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,
-              $33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45
-            )
-            ON CONFLICT (dtlkey) DO UPDATE SET
-              offsetqty=EXCLUDED.offsetqty,
-              qty=EXCLUDED.qty,
-              unitprice=EXCLUDED.unitprice,
-              amount=EXCLUDED.amount,
-              changed=EXCLUDED.changed
-          `, [
-            line.dtlkey,line.dockey,line.seq??null,line.styleid??null,
-            safe(line.number),safe(line.itemcode),safe(line.location),safe(line.batch),
-            safe(line.project),safe(line.description),safe(line.description2),
-            safe(line.description3),safe(line.permitno),
-            safe(line.qty),safe(line.uom),safe(line.rate),safe(line.sqty),
-            safe(line.suomqty),safe(line.offsetqty),safe(line.unitprice),
-            safeDate(line.deliverydate),safe(line.disc),safe(line.tax),
-            safe(line.tariff),safe(line.taxexemptionreason),safe(line.irbm_classification),
-            safe(line.taxrate),safe(line.taxamt),safe(line.localtaxamt),
-            safe(line.exempted_taxrate),safe(line.exempted_taxamt),
-            line.taxinclusive??null,safe(line.amount),safe(line.localamount),
-            safe(line.amountwithtax),line.printable??null,
-            safe(line.fromdoctype),line.fromdockey??null,line.fromdtlkey??null,
-            line.transferable??null,safe(line.remark1),safe(line.remark2),
-            safe(line.companyitemcode),safe(line.initialpurchasecost),line.changed??null,
-          ]);
-        }
-      } catch(e) { /* continue */ }
+        const pid = await getPeriodId(r.docdate);
+        await q(`
+          INSERT INTO sql_salesorders (
+            dockey,docno,docnoex,docdate,postdate,taxdate,
+            code,companyname,address1,address2,address3,address4,
+            postcode,city,state,country,phone1,mobile,fax1,attention,
+            area,agent,project,terms,currencycode,currencyrate,
+            shipper,description,cancelled,status,docamt,localdocamt,
+            d_docno,d_paymentmethod,d_chequenumber,d_paymentproject,
+            d_bankcharge,d_bankchargeaccount,d_amount,
+            validity,deliveryterm,cc,docref1,docref2,docref3,docref4,
+            branchname,daddress1,daddress2,daddress3,daddress4,
+            dpostcode,dcity,dstate,dcountry,dattention,dphone1,dmobile,dfax1,
+            taxexemptno,salestaxno,servicetaxno,tin,idtype,idno,
+            tourismno,sic,incoterms,submissiontype,peppol_uuid,businessunit,
+            attachments,note,approvestate,transferable,updatecount,printcount,
+            sql_lastmodified,occ_period_id,occ_synced_at,sql_raw
+          ) VALUES (
+            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
+            $11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
+            $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,
+            $31,$32,$33,$34,$35,$36,$37,$38,$39,$40,
+            $41,$42,$43,$44,$45,$46,$47,$48,$49,$50,
+            $51,$52,$53,$54,$55,$56,$57,$58,$59,$60,
+            $61,$62,$63,$64,$65,$66,$67,$68,$69,$70,
+            $71,$72,$73,$74,$75,$76,$77,$78,$79,NOW(),$80
+          )
+          ON CONFLICT (dockey) DO UPDATE SET
+            status=EXCLUDED.status,docamt=EXCLUDED.docamt,cancelled=EXCLUDED.cancelled,
+            docref1=EXCLUDED.docref1,docref2=EXCLUDED.docref2,docref3=EXCLUDED.docref3,
+            updatecount=EXCLUDED.updatecount,companyname=EXCLUDED.companyname,
+            sql_lastmodified=EXCLUDED.sql_lastmodified,occ_synced_at=NOW(),
+            sql_raw=EXCLUDED.sql_raw
+          WHERE sql_salesorders.sql_lastmodified IS NULL
+             OR EXCLUDED.sql_lastmodified > sql_salesorders.sql_lastmodified
+        `, [
+          r.dockey,safe(r.docno),safe(r.docnoex),safeDate(r.docdate),
+          safeDate(r.postdate),safeDate(r.taxdate),
+          safe(r.code),safe(r.companyname),safe(r.address1),safe(r.address2),
+          safe(r.address3),safe(r.address4),safe(r.postcode),safe(r.city),
+          safe(r.state),safe(r.country),safe(r.phone1),safe(r.mobile),
+          safe(r.fax1),safe(r.attention),safe(r.area),safe(r.agent),
+          safe(r.project),safe(r.terms),safe(r.currencycode),safe(r.currencyrate),
+          safe(r.shipper),safe(r.description),r.cancelled??false,r.status??null,
+          safe(r.docamt),safe(r.localdocamt),safe(r.d_docno),safe(r.d_paymentmethod),
+          safe(r.d_chequenumber),safe(r.d_paymentproject),safe(r.d_bankcharge),
+          safe(r.d_bankchargeaccount),safe(r.d_amount),safe(r.validity),
+          safe(r.deliveryterm),safe(r.cc),
+          safe(r.docref1),safe(r.docref2),safe(r.docref3),safe(r.docref4),
+          safe(r.branchname),safe(r.daddress1),safe(r.daddress2),safe(r.daddress3),
+          safe(r.daddress4),safe(r.dpostcode),safe(r.dcity),safe(r.dstate),
+          safe(r.dcountry),safe(r.dattention),safe(r.dphone1),safe(r.dmobile),
+          safe(r.dfax1),safe(r.taxexemptno),safe(r.salestaxno),safe(r.servicetaxno),
+          safe(r.tin),r.idtype??null,safe(r.idno),safe(r.tourismno),
+          safe(r.sic),safe(r.incoterms),r.submissiontype??null,
+          safe(r.peppol_uuid),safe(r.businessunit),
+          r.attachments?JSON.stringify(r.attachments):null,
+          safe(r.note),safe(r.approvestate),r.transferable??null,
+          r.updatecount??null,r.printcount??null,r.lastmodified??null,
+          pid,JSON.stringify(r),
+        ]);
+        upserted++;
+        changed.push(r.dockey);
+        if (r.lastmodified && r.lastmodified > maxMod) maxMod = r.lastmodified;
+      } catch(e) { console.error('SO err dockey='+r.dockey+':',e.message.slice(0,80)); }
     }
-
-    await logSync('SALESORDERS', 'SUCCESS', fetched, upserted, maxLastModified, null, started);
-    return { fetched, upserted, linesUpdated: dockeysToUpdate.length };
-
-  } catch(e) {
-    await logSync('SALESORDERS', 'FAILED', fetched, upserted, maxLastModified, e.message, started);
-    throw e;
+    if (records.length < 50) break;
+    offset += 50;
+    if (offset > 20000) break;
   }
+
+  // Update offsetqty on SO lines for changed SOs (max 5 to stay within time)
+  let linesUpdated = 0;
+  for (const dockey of changed.slice(0, 5)) {
+    try {
+      const detail = await fetchDetail('/salesorder', dockey);
+      if (!detail?.sdsdocdetail?.length) continue;
+      for (const line of detail.sdsdocdetail) {
+        await q(`
+          INSERT INTO sql_so_lines (
+            dtlkey,dockey,seq,styleid,number,itemcode,location,batch,
+            project,description,description2,description3,permitno,
+            qty,uom,rate,sqty,suomqty,offsetqty,unitprice,deliverydate,
+            disc,tax,tariff,taxexemptionreason,irbm_classification,
+            taxrate,taxamt,localtaxamt,exempted_taxrate,exempted_taxamt,
+            taxinclusive,amount,localamount,amountwithtax,printable,
+            fromdoctype,fromdockey,fromdtlkey,transferable,
+            remark1,remark2,companyitemcode,initialpurchasecost,changed
+          ) VALUES (
+            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
+            $18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,
+            $33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45
+          )
+          ON CONFLICT (dtlkey) DO UPDATE SET
+            offsetqty=EXCLUDED.offsetqty,qty=EXCLUDED.qty,
+            unitprice=EXCLUDED.unitprice,amount=EXCLUDED.amount
+        `, [
+          line.dtlkey,line.dockey,line.seq??null,line.styleid??null,
+          safe(line.number),safe(line.itemcode),safe(line.location),safe(line.batch),
+          safe(line.project),safe(line.description),safe(line.description2),
+          safe(line.description3),safe(line.permitno),
+          safe(line.qty),safe(line.uom),safe(line.rate),safe(line.sqty),
+          safe(line.suomqty),safe(line.offsetqty),safe(line.unitprice),
+          safeDate(line.deliverydate),safe(line.disc),safe(line.tax),
+          safe(line.tariff),safe(line.taxexemptionreason),safe(line.irbm_classification),
+          safe(line.taxrate),safe(line.taxamt),safe(line.localtaxamt),
+          safe(line.exempted_taxrate),safe(line.exempted_taxamt),
+          line.taxinclusive??null,safe(line.amount),safe(line.localamount),
+          safe(line.amountwithtax),line.printable??null,
+          safe(line.fromdoctype),line.fromdockey??null,line.fromdtlkey??null,
+          line.transferable??null,safe(line.remark1),safe(line.remark2),
+          safe(line.companyitemcode),safe(line.initialpurchasecost),line.changed??null,
+        ]);
+        linesUpdated++;
+      }
+    } catch(e) { /* continue */ }
+  }
+
+  await logSync('SALESORDERS','SUCCESS',fetched,upserted,maxMod,null,started);
+  return { fetched, upserted, linesUpdated, changedCount: changed.length };
 }
 
 // ── DELIVERY ORDERS ───────────────────────────────────────────
-async function syncDeliveryOrders(lastModified) {
+async function syncDeliveryOrders() {
   const started = new Date();
-  let fetched = 0, upserted = 0, maxLastModified = lastModified ?? 0;
+  const lastMod = await getLastModified('DELIVERYORDERS');
+  let fetched = 0, upserted = 0, maxMod = lastMod ?? 0;
 
-  try {
-    let offset = 0;
-    while (true) {
-      const { blocked, records } = await fetchPage('/deliveryorder', offset);
-      if (blocked) { await logSync('DELIVERYORDERS', 'FAILED', fetched, upserted, maxLastModified, 'Blocked', started); return; }
-      if (!records.length) break;
+  let offset = 0;
+  while (true) {
+    const { blocked, records } = await fetchPage('/deliveryorder', offset);
+    if (blocked) { await logSync('DELIVERYORDERS','FAILED',fetched,upserted,maxMod,'Blocked',started); return { error:'Blocked' }; }
+    if (!records.length) break;
 
-      for (const r of records) {
-        fetched++;
-        if (lastModified && r.lastmodified && r.lastmodified <= lastModified) continue;
-
-        try {
-          const pid = await getPeriodId(r.docdate);
-          await q(`
-            INSERT INTO sql_deliveryorders (
-              dockey,docno,docnoex,docdate,postdate,taxdate,
-              code,companyname,address1,address2,address3,address4,
-              postcode,city,state,country,phone1,mobile,fax1,attention,
-              area,agent,project,terms,currencycode,currencyrate,
-              shipper,description,cancelled,status,docamt,localdocamt,d_amount,
-              validity,deliveryterm,cc,docref1,docref2,docref3,docref4,
-              branchname,daddress1,daddress2,daddress3,daddress4,
-              dpostcode,dcity,dstate,dcountry,dattention,dphone1,dmobile,dfax1,
-              taxexemptno,salestaxno,servicetaxno,tin,idtype,idno,
-              tourismno,sic,incoterms,submissiontype,businessunit,
-              attachments,note,approvestate,transferable,updatecount,printcount,
-              sql_lastmodified,occ_period_id,occ_synced_at,sql_raw
-            ) VALUES (
-              $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
-              $11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-              $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,
-              $31,$32,$33,$34,$35,$36,$37,$38,$39,$40,
-              $41,$42,$43,$44,$45,$46,$47,$48,$49,$50,
-              $51,$52,$53,$54,$55,$56,$57,$58,$59,$60,
-              $61,$62,$63,$64,$65,$66,$67,$68,$69,$70,
-              $71,$72,NOW(),$73
-            )
-            ON CONFLICT (dockey) DO UPDATE SET
-              status=EXCLUDED.status,cancelled=EXCLUDED.cancelled,
-              docamt=EXCLUDED.docamt,docref1=EXCLUDED.docref1,
-              docref2=EXCLUDED.docref2,companyname=EXCLUDED.companyname,
-              sql_lastmodified=EXCLUDED.sql_lastmodified,occ_synced_at=NOW(),
-              sql_raw=EXCLUDED.sql_raw
-            WHERE sql_deliveryorders.sql_lastmodified IS NULL
-               OR EXCLUDED.sql_lastmodified > sql_deliveryorders.sql_lastmodified
-          `, [
-            r.dockey,safe(r.docno),safe(r.docnoex),safeDate(r.docdate),
-            safeDate(r.postdate),safeDate(r.taxdate),
-            safe(r.code),safe(r.companyname),safe(r.address1),safe(r.address2),
-            safe(r.address3),safe(r.address4),safe(r.postcode),safe(r.city),
-            safe(r.state),safe(r.country),safe(r.phone1),safe(r.mobile),
-            safe(r.fax1),safe(r.attention),safe(r.area),safe(r.agent),
-            safe(r.project),safe(r.terms),safe(r.currencycode),safe(r.currencyrate),
-            safe(r.shipper),safe(r.description),r.cancelled??false,r.status??null,
-            safe(r.docamt),safe(r.localdocamt),safe(r.d_amount),safe(r.validity),
-            safe(r.deliveryterm),safe(r.cc),
-            safe(r.docref1),safe(r.docref2),safe(r.docref3),safe(r.docref4),
-            safe(r.branchname),safe(r.daddress1),safe(r.daddress2),safe(r.daddress3),
-            safe(r.daddress4),safe(r.dpostcode),safe(r.dcity),safe(r.dstate),
-            safe(r.dcountry),safe(r.dattention),safe(r.dphone1),safe(r.dmobile),
-            safe(r.dfax1),safe(r.taxexemptno),safe(r.salestaxno),safe(r.servicetaxno),
-            safe(r.tin),r.idtype??null,safe(r.idno),safe(r.tourismno),
-            safe(r.sic),safe(r.incoterms),r.submissiontype??null,safe(r.businessunit),
-            r.attachments?JSON.stringify(r.attachments):null,
-            safe(r.note),safe(r.approvestate),r.transferable??null,
-            r.updatecount??null,r.printcount??null,r.lastmodified??null,
-            pid,JSON.stringify(r),
-          ]);
-          upserted++;
-          if (r.lastmodified && r.lastmodified > maxLastModified) maxLastModified = r.lastmodified;
-        } catch(e) {
-          console.error('DO sync error dockey='+r.dockey+':', e.message.slice(0,100));
-        }
-      }
-
-      if (records.length < 50) break;
-      offset += 50;
-      if (offset > 30000) break;
+    for (const r of records) {
+      fetched++;
+      if (lastMod && r.lastmodified && r.lastmodified <= lastMod) continue;
+      try {
+        const pid = await getPeriodId(r.docdate);
+        await q(`
+          INSERT INTO sql_deliveryorders (
+            dockey,docno,docnoex,docdate,postdate,taxdate,
+            code,companyname,address1,address2,address3,address4,
+            postcode,city,state,country,phone1,mobile,fax1,attention,
+            area,agent,project,terms,currencycode,currencyrate,
+            shipper,description,cancelled,status,docamt,localdocamt,d_amount,
+            validity,deliveryterm,cc,docref1,docref2,docref3,docref4,
+            branchname,daddress1,daddress2,daddress3,daddress4,
+            dpostcode,dcity,dstate,dcountry,dattention,dphone1,dmobile,dfax1,
+            taxexemptno,salestaxno,servicetaxno,tin,idtype,idno,
+            tourismno,sic,incoterms,submissiontype,businessunit,
+            attachments,note,approvestate,transferable,updatecount,printcount,
+            sql_lastmodified,occ_period_id,occ_synced_at,sql_raw
+          ) VALUES (
+            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
+            $11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
+            $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,
+            $31,$32,$33,$34,$35,$36,$37,$38,$39,$40,
+            $41,$42,$43,$44,$45,$46,$47,$48,$49,$50,
+            $51,$52,$53,$54,$55,$56,$57,$58,$59,$60,
+            $61,$62,$63,$64,$65,$66,$67,$68,$69,$70,
+            $71,$72,NOW(),$73
+          )
+          ON CONFLICT (dockey) DO UPDATE SET
+            status=EXCLUDED.status,cancelled=EXCLUDED.cancelled,
+            docamt=EXCLUDED.docamt,docref1=EXCLUDED.docref1,
+            docref2=EXCLUDED.docref2,companyname=EXCLUDED.companyname,
+            sql_lastmodified=EXCLUDED.sql_lastmodified,occ_synced_at=NOW(),
+            sql_raw=EXCLUDED.sql_raw
+          WHERE sql_deliveryorders.sql_lastmodified IS NULL
+             OR EXCLUDED.sql_lastmodified > sql_deliveryorders.sql_lastmodified
+        `, [
+          r.dockey,safe(r.docno),safe(r.docnoex),safeDate(r.docdate),
+          safeDate(r.postdate),safeDate(r.taxdate),
+          safe(r.code),safe(r.companyname),safe(r.address1),safe(r.address2),
+          safe(r.address3),safe(r.address4),safe(r.postcode),safe(r.city),
+          safe(r.state),safe(r.country),safe(r.phone1),safe(r.mobile),
+          safe(r.fax1),safe(r.attention),safe(r.area),safe(r.agent),
+          safe(r.project),safe(r.terms),safe(r.currencycode),safe(r.currencyrate),
+          safe(r.shipper),safe(r.description),r.cancelled??false,r.status??null,
+          safe(r.docamt),safe(r.localdocamt),safe(r.d_amount),safe(r.validity),
+          safe(r.deliveryterm),safe(r.cc),
+          safe(r.docref1),safe(r.docref2),safe(r.docref3),safe(r.docref4),
+          safe(r.branchname),safe(r.daddress1),safe(r.daddress2),safe(r.daddress3),
+          safe(r.daddress4),safe(r.dpostcode),safe(r.dcity),safe(r.dstate),
+          safe(r.dcountry),safe(r.dattention),safe(r.dphone1),safe(r.dmobile),
+          safe(r.dfax1),safe(r.taxexemptno),safe(r.salestaxno),safe(r.servicetaxno),
+          safe(r.tin),r.idtype??null,safe(r.idno),safe(r.tourismno),
+          safe(r.sic),safe(r.incoterms),r.submissiontype??null,safe(r.businessunit),
+          r.attachments?JSON.stringify(r.attachments):null,
+          safe(r.note),safe(r.approvestate),r.transferable??null,
+          r.updatecount??null,r.printcount??null,r.lastmodified??null,
+          pid,JSON.stringify(r),
+        ]);
+        upserted++;
+        if (r.lastmodified && r.lastmodified > maxMod) maxMod = r.lastmodified;
+      } catch(e) { console.error('DO err dockey='+r.dockey+':',e.message.slice(0,80)); }
     }
-
-    await logSync('DELIVERYORDERS', 'SUCCESS', fetched, upserted, maxLastModified, null, started);
-    return { fetched, upserted };
-
-  } catch(e) {
-    await logSync('DELIVERYORDERS', 'FAILED', fetched, upserted, maxLastModified, e.message, started);
-    throw e;
+    if (records.length < 50) break;
+    offset += 50;
+    if (offset > 30000) break;
   }
+
+  await logSync('DELIVERYORDERS','SUCCESS',fetched,upserted,maxMod,null,started);
+  return { fetched, upserted };
 }
 
 // ── SALES INVOICES ────────────────────────────────────────────
-async function syncSalesInvoices(lastModified) {
+async function syncSalesInvoices() {
   const started = new Date();
-  let fetched = 0, upserted = 0, maxLastModified = lastModified ?? 0;
+  const lastMod = await getLastModified('SALESINVOICES');
+  let fetched = 0, upserted = 0, maxMod = lastMod ?? 0;
 
-  try {
-    let offset = 0;
-    while (true) {
-      const { blocked, records } = await fetchPage('/salesinvoice', offset);
-      if (blocked) { await logSync('SALESINVOICES', 'FAILED', fetched, upserted, maxLastModified, 'Blocked', started); return; }
-      if (!records.length) break;
+  let offset = 0;
+  while (true) {
+    const { blocked, records } = await fetchPage('/salesinvoice', offset);
+    if (blocked) { await logSync('SALESINVOICES','FAILED',fetched,upserted,maxMod,'Blocked',started); return { error:'Blocked' }; }
+    if (!records.length) break;
 
-      for (const r of records) {
-        fetched++;
-        if (lastModified && r.lastmodified && r.lastmodified <= lastModified) continue;
-
-        try {
-          const pid = await getPeriodId(r.docdate);
-          await q(`
-            INSERT INTO sql_salesinvoices (
-              dockey,docno,docnoex,docdate,postdate,taxdate,
-              eiv_utc,eiv_received_utc,eiv_validated_utc,
-              code,companyname,address1,address2,address3,address4,
-              postcode,city,state,country,phone1,mobile,fax1,attention,
-              area,agent,project,terms,currencycode,currencyrate,
-              shipper,description,cancelled,status,docamt,localdocamt,d_amount,
-              validity,deliveryterm,cc,docref1,docref2,docref3,docref4,
-              branchname,daddress1,daddress2,daddress3,daddress4,
-              dpostcode,dcity,dstate,dcountry,dattention,dphone1,dmobile,dfax1,
-              taxexemptno,salestaxno,servicetaxno,tin,idtype,idno,
-              tourismno,sic,incoterms,submissiontype,
-              irbm_status,irbm_internalid,irbm_uuid,irbm_longid,
-              eivrequest_uuid,peppol_uuid,peppol_docuuid,businessunit,
-              attachments,note,approvestate,transferable,updatecount,printcount,
-              sql_lastmodified,occ_period_id,occ_synced_at,sql_raw
-            ) VALUES (
-              $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
-              $11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-              $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,
-              $31,$32,$33,$34,$35,$36,$37,$38,$39,$40,
-              $41,$42,$43,$44,$45,$46,$47,$48,$49,$50,
-              $51,$52,$53,$54,$55,$56,$57,$58,$59,$60,
-              $61,$62,$63,$64,$65,$66,$67,$68,$69,$70,
-              $71,$72,$73,$74,$75,$76,$77,$78,$79,$80,NOW(),$81
-            )
-            ON CONFLICT (dockey) DO UPDATE SET
-              status=EXCLUDED.status,cancelled=EXCLUDED.cancelled,
-              docamt=EXCLUDED.docamt,companyname=EXCLUDED.companyname,
-              sql_lastmodified=EXCLUDED.sql_lastmodified,occ_synced_at=NOW(),
-              sql_raw=EXCLUDED.sql_raw
-            WHERE sql_salesinvoices.sql_lastmodified IS NULL
-               OR EXCLUDED.sql_lastmodified > sql_salesinvoices.sql_lastmodified
-          `, [
-            r.dockey,safe(r.docno),safe(r.docnoex),safeDate(r.docdate),
-            safeDate(r.postdate),safeDate(r.taxdate),
-            safe(r.eiv_utc),safe(r.eiv_received_utc),safe(r.eiv_validated_utc),
-            safe(r.code),safe(r.companyname),safe(r.address1),safe(r.address2),
-            safe(r.address3),safe(r.address4),safe(r.postcode),safe(r.city),
-            safe(r.state),safe(r.country),safe(r.phone1),safe(r.mobile),
-            safe(r.fax1),safe(r.attention),safe(r.area),safe(r.agent),
-            safe(r.project),safe(r.terms),safe(r.currencycode),safe(r.currencyrate),
-            safe(r.shipper),safe(r.description),r.cancelled??false,r.status??null,
-            safe(r.docamt),safe(r.localdocamt),safe(r.d_amount),safe(r.validity),
-            safe(r.deliveryterm),safe(r.cc),
-            safe(r.docref1),safe(r.docref2),safe(r.docref3),safe(r.docref4),
-            safe(r.branchname),safe(r.daddress1),safe(r.daddress2),safe(r.daddress3),
-            safe(r.daddress4),safe(r.dpostcode),safe(r.dcity),safe(r.dstate),
-            safe(r.dcountry),safe(r.dattention),safe(r.dphone1),safe(r.dmobile),
-            safe(r.dfax1),safe(r.taxexemptno),safe(r.salestaxno),safe(r.servicetaxno),
-            safe(r.tin),r.idtype??null,safe(r.idno),safe(r.tourismno),
-            safe(r.sic),safe(r.incoterms),r.submissiontype??null,
-            r.irbm_status??null,safe(r.irbm_internalid),safe(r.irbm_uuid),
-            safe(r.irbm_longid),safe(r.eivrequest_uuid),safe(r.peppol_uuid),
-            safe(r.peppol_docuuid),safe(r.businessunit),
-            r.attachments?JSON.stringify(r.attachments):null,
-            safe(r.note),safe(r.approvestate),r.transferable??null,
-            r.updatecount??null,r.printcount??null,r.lastmodified??null,
-            pid,JSON.stringify(r),
-          ]);
-          upserted++;
-          if (r.lastmodified && r.lastmodified > maxLastModified) maxLastModified = r.lastmodified;
-        } catch(e) {
-          console.error('INV sync error dockey='+r.dockey+':', e.message.slice(0,100));
-        }
-      }
-
-      if (records.length < 50) break;
-      offset += 50;
-      if (offset > 60000) break;
+    for (const r of records) {
+      fetched++;
+      if (lastMod && r.lastmodified && r.lastmodified <= lastMod) continue;
+      try {
+        const pid = await getPeriodId(r.docdate);
+        await q(`
+          INSERT INTO sql_salesinvoices (
+            dockey,docno,docnoex,docdate,postdate,taxdate,
+            eiv_utc,eiv_received_utc,eiv_validated_utc,
+            code,companyname,address1,address2,address3,address4,
+            postcode,city,state,country,phone1,mobile,fax1,attention,
+            area,agent,project,terms,currencycode,currencyrate,
+            shipper,description,cancelled,status,docamt,localdocamt,d_amount,
+            validity,deliveryterm,cc,docref1,docref2,docref3,docref4,
+            branchname,daddress1,daddress2,daddress3,daddress4,
+            dpostcode,dcity,dstate,dcountry,dattention,dphone1,dmobile,dfax1,
+            taxexemptno,salestaxno,servicetaxno,tin,idtype,idno,
+            tourismno,sic,incoterms,submissiontype,
+            irbm_status,irbm_internalid,irbm_uuid,irbm_longid,
+            eivrequest_uuid,peppol_uuid,peppol_docuuid,businessunit,
+            attachments,note,approvestate,transferable,updatecount,printcount,
+            sql_lastmodified,occ_period_id,occ_synced_at,sql_raw
+          ) VALUES (
+            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
+            $11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
+            $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,
+            $31,$32,$33,$34,$35,$36,$37,$38,$39,$40,
+            $41,$42,$43,$44,$45,$46,$47,$48,$49,$50,
+            $51,$52,$53,$54,$55,$56,$57,$58,$59,$60,
+            $61,$62,$63,$64,$65,$66,$67,$68,$69,$70,
+            $71,$72,$73,$74,$75,$76,$77,$78,$79,$80,NOW(),$81
+          )
+          ON CONFLICT (dockey) DO UPDATE SET
+            status=EXCLUDED.status,cancelled=EXCLUDED.cancelled,
+            docamt=EXCLUDED.docamt,companyname=EXCLUDED.companyname,
+            sql_lastmodified=EXCLUDED.sql_lastmodified,occ_synced_at=NOW(),
+            sql_raw=EXCLUDED.sql_raw
+          WHERE sql_salesinvoices.sql_lastmodified IS NULL
+             OR EXCLUDED.sql_lastmodified > sql_salesinvoices.sql_lastmodified
+        `, [
+          r.dockey,safe(r.docno),safe(r.docnoex),safeDate(r.docdate),
+          safeDate(r.postdate),safeDate(r.taxdate),
+          safe(r.eiv_utc),safe(r.eiv_received_utc),safe(r.eiv_validated_utc),
+          safe(r.code),safe(r.companyname),safe(r.address1),safe(r.address2),
+          safe(r.address3),safe(r.address4),safe(r.postcode),safe(r.city),
+          safe(r.state),safe(r.country),safe(r.phone1),safe(r.mobile),
+          safe(r.fax1),safe(r.attention),safe(r.area),safe(r.agent),
+          safe(r.project),safe(r.terms),safe(r.currencycode),safe(r.currencyrate),
+          safe(r.shipper),safe(r.description),r.cancelled??false,r.status??null,
+          safe(r.docamt),safe(r.localdocamt),safe(r.d_amount),safe(r.validity),
+          safe(r.deliveryterm),safe(r.cc),
+          safe(r.docref1),safe(r.docref2),safe(r.docref3),safe(r.docref4),
+          safe(r.branchname),safe(r.daddress1),safe(r.daddress2),safe(r.daddress3),
+          safe(r.daddress4),safe(r.dpostcode),safe(r.dcity),safe(r.dstate),
+          safe(r.dcountry),safe(r.dattention),safe(r.dphone1),safe(r.dmobile),
+          safe(r.dfax1),safe(r.taxexemptno),safe(r.salestaxno),safe(r.servicetaxno),
+          safe(r.tin),r.idtype??null,safe(r.idno),safe(r.tourismno),
+          safe(r.sic),safe(r.incoterms),r.submissiontype??null,
+          r.irbm_status??null,safe(r.irbm_internalid),safe(r.irbm_uuid),
+          safe(r.irbm_longid),safe(r.eivrequest_uuid),safe(r.peppol_uuid),
+          safe(r.peppol_docuuid),safe(r.businessunit),
+          r.attachments?JSON.stringify(r.attachments):null,
+          safe(r.note),safe(r.approvestate),r.transferable??null,
+          r.updatecount??null,r.printcount??null,r.lastmodified??null,
+          pid,JSON.stringify(r),
+        ]);
+        upserted++;
+        if (r.lastmodified && r.lastmodified > maxMod) maxMod = r.lastmodified;
+      } catch(e) { console.error('INV err dockey='+r.dockey+':',e.message.slice(0,80)); }
     }
-
-    await logSync('SALESINVOICES', 'SUCCESS', fetched, upserted, maxLastModified, null, started);
-    return { fetched, upserted };
-
-  } catch(e) {
-    await logSync('SALESINVOICES', 'FAILED', fetched, upserted, maxLastModified, e.message, started);
-    throw e;
+    if (records.length < 50) break;
+    offset += 50;
+    if (offset > 60000) break;
   }
+
+  await logSync('SALESINVOICES','SUCCESS',fetched,upserted,maxMod,null,started);
+  return { fetched, upserted };
 }
 
 // ── RECEIPT VOUCHERS ──────────────────────────────────────────
-async function syncReceiptVouchers(lastModified) {
+async function syncReceiptVouchers() {
   const started = new Date();
-  let fetched = 0, upserted = 0, maxLastModified = lastModified ?? 0;
+  const lastMod = await getLastModified('RECEIPTVOUCHERS');
+  let fetched = 0, upserted = 0, maxMod = lastMod ?? 0;
 
-  try {
-    let offset = 0;
-    while (true) {
-      const { blocked, records } = await fetchPage('/receiptvoucher', offset);
-      if (blocked) { await logSync('RECEIPTVOUCHERS', 'FAILED', fetched, upserted, maxLastModified, 'Blocked', started); return; }
-      if (!records.length) break;
+  let offset = 0;
+  while (true) {
+    const { blocked, records } = await fetchPage('/receiptvoucher', offset);
+    if (blocked) { await logSync('RECEIPTVOUCHERS','FAILED',fetched,upserted,maxMod,'Blocked',started); return { error:'Blocked' }; }
+    if (!records.length) break;
 
-      for (const r of records) {
-        fetched++;
-        if (lastModified && r.lastmodified && r.lastmodified <= lastModified) continue;
-
-        try {
-          const pid = await getPeriodId(r.docdate);
-          await q(`
-            INSERT INTO sql_receiptvouchers (
-              dockey,docno,doctype,docdate,postdate,taxdate,
-              companyname,description,description2,
-              paymentmethod,area,agent,project,journal,chequenumber,
-              currencycode,currencyrate,bankcharge,bankchargeaccount,
-              docamt,localdocamt,fromdoctype,bounceddate,gltransid,
-              cancelled,status,depositkey,fromdoc,
-              salestaxno,servicetaxno,tin,idtype,idno,tourismno,sic,
-              submissiontype,irbm_status,irbm_internalid,irbm_uuid,irbm_longid,
-              peppol_uuid,peppol_docuuid,updatecount,printcount,
-              attachments,note,approvestate,sql_lastmodified,
-              occ_period_id,occ_synced_at,sql_raw
-            ) VALUES (
-              $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
-              $16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,
-              $29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,
-              $42,$43,$44,$45,$46,$47,$48,$49,NOW(),$50
-            )
-            ON CONFLICT (dockey) DO UPDATE SET
-              status=EXCLUDED.status,cancelled=EXCLUDED.cancelled,
-              docamt=EXCLUDED.docamt,description=EXCLUDED.description,
-              sql_lastmodified=EXCLUDED.sql_lastmodified,occ_synced_at=NOW(),
-              sql_raw=EXCLUDED.sql_raw
-            WHERE sql_receiptvouchers.sql_lastmodified IS NULL
-               OR EXCLUDED.sql_lastmodified > sql_receiptvouchers.sql_lastmodified
-          `, [
-            r.dockey,safe(r.docno),safe(r.doctype),safeDate(r.docdate),
-            safeDate(r.postdate),safeDate(r.taxdate),
-            safe(r.companyname),safe(r.description),safe(r.description2),
-            safe(r.paymentmethod),safe(r.area),safe(r.agent),safe(r.project),
-            safe(r.journal),safe(r.chequenumber),
-            safe(r.currencycode),safe(r.currencyrate),
-            safe(r.bankcharge),safe(r.bankchargeaccount),
-            safe(r.docamt),safe(r.localdocamt),safe(r.fromdoctype),
-            safeDate(r.bounceddate),r.gltransid??null,
-            r.cancelled??false,r.status??null,safe(r.depositkey),safe(r.fromdoc),
-            safe(r.salestaxno),safe(r.servicetaxno),safe(r.tin),r.idtype??null,
-            safe(r.idno),safe(r.tourismno),safe(r.sic),r.submissiontype??null,
-            r.irbm_status??null,safe(r.irbm_internalid),safe(r.irbm_uuid),
-            safe(r.irbm_longid),safe(r.peppol_uuid),safe(r.peppol_docuuid),
-            r.updatecount??null,r.printcount??null,
-            r.attachments?JSON.stringify(r.attachments):null,
-            safe(r.note),safe(r.approvestate),r.lastmodified??null,
-            pid,JSON.stringify(r),
-          ]);
-          upserted++;
-          if (r.lastmodified && r.lastmodified > maxLastModified) maxLastModified = r.lastmodified;
-        } catch(e) {
-          console.error('RV sync error dockey='+r.dockey+':', e.message.slice(0,100));
-        }
-      }
-
-      if (records.length < 50) break;
-      offset += 50;
-      if (offset > 70000) break;
+    for (const r of records) {
+      fetched++;
+      if (lastMod && r.lastmodified && r.lastmodified <= lastMod) continue;
+      try {
+        const pid = await getPeriodId(r.docdate);
+        await q(`
+          INSERT INTO sql_receiptvouchers (
+            dockey,docno,doctype,docdate,postdate,taxdate,
+            companyname,description,description2,
+            paymentmethod,area,agent,project,journal,chequenumber,
+            currencycode,currencyrate,bankcharge,bankchargeaccount,
+            docamt,localdocamt,fromdoctype,bounceddate,gltransid,
+            cancelled,status,depositkey,fromdoc,
+            salestaxno,servicetaxno,tin,idtype,idno,tourismno,sic,
+            submissiontype,irbm_status,irbm_internalid,irbm_uuid,irbm_longid,
+            peppol_uuid,peppol_docuuid,updatecount,printcount,
+            attachments,note,approvestate,sql_lastmodified,
+            occ_period_id,occ_synced_at,sql_raw
+          ) VALUES (
+            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
+            $16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,
+            $29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,
+            $42,$43,$44,$45,$46,$47,$48,$49,NOW(),$50
+          )
+          ON CONFLICT (dockey) DO UPDATE SET
+            status=EXCLUDED.status,cancelled=EXCLUDED.cancelled,
+            docamt=EXCLUDED.docamt,description=EXCLUDED.description,
+            sql_lastmodified=EXCLUDED.sql_lastmodified,occ_synced_at=NOW(),
+            sql_raw=EXCLUDED.sql_raw
+          WHERE sql_receiptvouchers.sql_lastmodified IS NULL
+             OR EXCLUDED.sql_lastmodified > sql_receiptvouchers.sql_lastmodified
+        `, [
+          r.dockey,safe(r.docno),safe(r.doctype),safeDate(r.docdate),
+          safeDate(r.postdate),safeDate(r.taxdate),
+          safe(r.companyname),safe(r.description),safe(r.description2),
+          safe(r.paymentmethod),safe(r.area),safe(r.agent),safe(r.project),
+          safe(r.journal),safe(r.chequenumber),
+          safe(r.currencycode),safe(r.currencyrate),
+          safe(r.bankcharge),safe(r.bankchargeaccount),
+          safe(r.docamt),safe(r.localdocamt),safe(r.fromdoctype),
+          safeDate(r.bounceddate),r.gltransid??null,
+          r.cancelled??false,r.status??null,safe(r.depositkey),safe(r.fromdoc),
+          safe(r.salestaxno),safe(r.servicetaxno),safe(r.tin),r.idtype??null,
+          safe(r.idno),safe(r.tourismno),safe(r.sic),r.submissiontype??null,
+          r.irbm_status??null,safe(r.irbm_internalid),safe(r.irbm_uuid),
+          safe(r.irbm_longid),safe(r.peppol_uuid),safe(r.peppol_docuuid),
+          r.updatecount??null,r.printcount??null,
+          r.attachments?JSON.stringify(r.attachments):null,
+          safe(r.note),safe(r.approvestate),r.lastmodified??null,
+          pid,JSON.stringify(r),
+        ]);
+        upserted++;
+        if (r.lastmodified && r.lastmodified > maxMod) maxMod = r.lastmodified;
+      } catch(e) { console.error('RV err dockey='+r.dockey+':',e.message.slice(0,80)); }
     }
-
-    await logSync('RECEIPTVOUCHERS', 'SUCCESS', fetched, upserted, maxLastModified, null, started);
-    return { fetched, upserted };
-
-  } catch(e) {
-    await logSync('RECEIPTVOUCHERS', 'FAILED', fetched, upserted, maxLastModified, e.message, started);
-    throw e;
+    if (records.length < 50) break;
+    offset += 50;
+    if (offset > 70000) break;
   }
+
+  await logSync('RECEIPTVOUCHERS','SUCCESS',fetched,upserted,maxMod,null,started);
+  return { fetched, upserted };
 }
 
-// ── CUSTOMERS (master data — hourly) ─────────────────────────
+// ── CUSTOMERS ─────────────────────────────────────────────────
 async function syncCustomers() {
   const started = new Date();
-  let fetched = 0, upserted = 0;
-  try {
-    const records = await fetchAll('/customer');
+  let fetched = 0, upserted = 0, offset = 0;
+  while (true) {
+    const { blocked, records } = await fetchPage('/customer', offset);
+    if (blocked || !records.length) break;
     for (const r of records) {
       fetched++;
       try {
@@ -606,9 +547,8 @@ async function syncCustomers() {
             $29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,NOW()
           )
           ON CONFLICT (code) DO UPDATE SET
-            companyname=EXCLUDED.companyname,creditterm=EXCLUDED.creditterm,
+            companyname=EXCLUDED.companyname,outstanding=EXCLUDED.outstanding,
             creditlimit=EXCLUDED.creditlimit,status=EXCLUDED.status,
-            outstanding=EXCLUDED.outstanding,
             sql_lastmodified=EXCLUDED.sql_lastmodified,synced_at=NOW()
           WHERE sql_customers.sql_lastmodified IS NULL
              OR EXCLUDED.sql_lastmodified > sql_customers.sql_lastmodified
@@ -631,20 +571,20 @@ async function syncCustomers() {
         upserted++;
       } catch(e) { /* skip */ }
     }
-    await logSync('CUSTOMERS', 'SUCCESS', fetched, upserted, null, null, started);
-    return { fetched, upserted };
-  } catch(e) {
-    await logSync('CUSTOMERS', 'FAILED', fetched, upserted, null, e.message, started);
-    throw e;
+    if (records.length < 50) break;
+    offset += 50;
   }
+  await logSync('CUSTOMERS','SUCCESS',fetched,upserted,null,null,started);
+  return { fetched, upserted };
 }
 
-// ── STOCK ITEMS (master data — hourly) ───────────────────────
+// ── STOCK ITEMS ───────────────────────────────────────────────
 async function syncStockItems() {
   const started = new Date();
-  let fetched = 0, upserted = 0;
-  try {
-    const records = await fetchAll('/stockitem');
+  let fetched = 0, upserted = 0, offset = 0;
+  while (true) {
+    const { blocked, records } = await fetchPage('/stockitem', offset);
+    if (blocked || !records.length) break;
     for (const r of records) {
       fetched++;
       try {
@@ -665,8 +605,8 @@ async function syncStockItems() {
           )
           ON CONFLICT (code) DO UPDATE SET
             description=EXCLUDED.description,isactive=EXCLUDED.isactive,
-            balsqty=EXCLUDED.balsqty,balsuomqty=EXCLUDED.balsuomqty,
-            sql_lastmodified=EXCLUDED.sql_lastmodified,synced_at=NOW()
+            balsqty=EXCLUDED.balsqty,sql_lastmodified=EXCLUDED.sql_lastmodified,
+            synced_at=NOW()
           WHERE sql_stockitems.sql_lastmodified IS NULL
              OR EXCLUDED.sql_lastmodified > sql_stockitems.sql_lastmodified
         `, [
@@ -685,28 +625,33 @@ async function syncStockItems() {
         upserted++;
       } catch(e) { /* skip */ }
     }
-    await logSync('STOCKITEMS', 'SUCCESS', fetched, upserted, null, null, started);
-    return { fetched, upserted };
-  } catch(e) {
-    await logSync('STOCKITEMS', 'FAILED', fetched, upserted, null, e.message, started);
-    throw e;
+    if (records.length < 50) break;
+    offset += 50;
   }
+  await logSync('STOCKITEMS','SUCCESS',fetched,upserted,null,null,started);
+  return { fetched, upserted };
+}
+
+// ── STATUS ────────────────────────────────────────────────────
+async function syncStatus() {
+  const r = await q(`
+    SELECT sync_type, status, completed_at, records_fetched,
+           records_upserted, duration_ms, error_message
+    FROM occ_sync_log
+    WHERE id IN (
+      SELECT MAX(id) FROM occ_sync_log GROUP BY sync_type
+    )
+    ORDER BY sync_type
+  `);
+  return { lastSyncs: r.rows };
 }
 
 // =============================================================
-// MAIN HANDLER
+// HANDLER
 // =============================================================
 export default async function handler(req, res) {
+  const { table } = req.query;
   const startTime = Date.now();
-
-  // Allow manual trigger with ?force=true to bypass cron auth
-  // Cron calls don't need auth — Vercel handles that
-  const isManual = req.query.force === 'true';
-  const isCron = req.headers['x-vercel-cron'] === '1';
-
-  if (!isManual && !isCron && process.env.NODE_ENV === 'production') {
-    return res.status(401).json({ error: 'Use ?force=true to trigger manually' });
-  }
 
   if (!process.env.DATABASE_URL) {
     return res.status(500).json({ error: 'DATABASE_URL not set' });
@@ -714,42 +659,29 @@ export default async function handler(req, res) {
 
   try {
     await warmPeriodCache();
+    let result;
 
-    // Determine which run this is — every 6th run syncs master data too
-    // We use minute of the hour to determine this (cron runs every 15 min)
-    const minute = new Date().getMinutes();
-    const syncMaster = isManual || minute === 0 || minute === 30; // on the hour and half hour
-
-    // Get last sync timestamps
-    const [soLastMod, doLastMod, invLastMod, rvLastMod] = await Promise.all([
-      getLastSyncTime('SALESORDERS'),
-      getLastSyncTime('DELIVERYORDERS'),
-      getLastSyncTime('SALESINVOICES'),
-      getLastSyncTime('RECEIPTVOUCHERS'),
-    ]);
-
-    // Run syncs
-    const results = {};
-
-    results.salesorders     = await syncSalesOrders(soLastMod);
-    results.deliveryorders  = await syncDeliveryOrders(doLastMod);
-    results.salesinvoices   = await syncSalesInvoices(invLastMod);
-    results.receiptvouchers = await syncReceiptVouchers(rvLastMod);
-
-    if (syncMaster) {
-      results.customers  = await syncCustomers();
-      results.stockitems = await syncStockItems();
+    switch (table) {
+      case 'salesorders':     result = await syncSalesOrders(); break;
+      case 'deliveryorders':  result = await syncDeliveryOrders(); break;
+      case 'salesinvoices':   result = await syncSalesInvoices(); break;
+      case 'receiptvouchers': result = await syncReceiptVouchers(); break;
+      case 'customers':       result = await syncCustomers(); break;
+      case 'stockitems':      result = await syncStockItems(); break;
+      case 'status':          result = await syncStatus(); break;
+      default:
+        return res.status(400).json({
+          error: 'Missing ?table= parameter',
+          valid: ['salesorders','deliveryorders','salesinvoices','receiptvouchers','customers','stockitems','status']
+        });
     }
 
     return res.status(200).json({
-      ok: true,
-      durationMs: Date.now() - startTime,
-      syncedMaster: syncMaster,
-      results,
+      ok: true, table, durationMs: Date.now() - startTime, ...result
     });
 
   } catch(e) {
     console.error('sync-postgres error:', e.message);
-    return res.status(500).json({ error: e.message, durationMs: Date.now() - startTime });
+    return res.status(500).json({ error: e.message, table });
   }
 }
