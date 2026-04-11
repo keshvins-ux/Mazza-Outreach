@@ -41,6 +41,7 @@ async function getSalesOrders() {
       so.docdate,
       so.code                           AS customerCode,
       so.companyname,
+      so.companyname                        AS customer,
       so.docamt,
       so.status,
       so.cancelled,
@@ -130,7 +131,8 @@ async function getReceiptVouchers() {
       dockey,
       docno,
       docdate,
-      description AS customer,
+      companyname AS customer,
+      description,
       docamt,
       paymentmethod,
       status,
@@ -158,7 +160,6 @@ async function getCustomers() {
       area,
       synced_at AS lastSynced
     FROM sql_customers
-    WHERE status = 'A'
     ORDER BY companyname
   `);
   return r.rows;
@@ -171,7 +172,7 @@ async function getStockItems() {
       code,
       description,
       stockgroup,
-      uom_code,
+      defuom_st AS uom_code,
       isactive,
       balsqty,
       synced_at AS lastSynced
