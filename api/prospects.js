@@ -1,58 +1,302 @@
+// api/prospects.js
+// OCC — Prospects, CRM, and Document Data
+//
+// SQL Account data (SO, DO, INV, RV) → reads from Postgres
+// OCC-native data (prospects, deals, po_intake, bom) → reads from Redis
+
 import { createClient } from 'redis';
+import { Pool } from 'pg';
 
 const PROSPECTS_KEY = 'mazza_prospects';
-const DEALS_KEY = 'mazza_deals';
+const DEALS_KEY     = 'mazza_deals';
 
-async function getClient() {
+// ── REDIS (OCC-native data only) ──────────────────────────────
+async function getRedisClient() {
   const client = createClient({ url: process.env.REDIS_URL });
   await client.connect();
   return client;
 }
 
+// ── POSTGRES (SQL Account mirrored data) ──────────────────────
+let _pool = null;
+function getPool() {
+  if (!_pool) _pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 3 });
+  return _pool;
+}
+async function q(sql, params = []) {
+  const client = await getPool().connect();
+  try { return await client.query(sql, params); }
+  finally { client.release(); }
+}
+
+// ── POSTGRES QUERIES ──────────────────────────────────────────
+
+// Sales Orders — maps to existing OCC frontend field names
+async function getSalesOrders() {
+  const r = await q(`
+    SELECT
+      so.dockey,
+      so.docno                          AS id,
+      so.docno,
+      so.docdate,
+      so.code                           AS customerCode,
+      so.companyname,
+      so.docamt,
+      so.status,
+      so.cancelled,
+      so.docref1                        AS customerPO,
+      so.docref2                        AS deliveryInfo,
+      so.docref3                        AS fulfillmentFlag,
+      so.occ_synced_at                  AS lastSynced,
+      COALESCE(
+        json_agg(
+          json_build_object(
+            'dtlkey',     sol.dtlkey,
+            'itemcode',   sol.itemcode,
+            'description',sol.description,
+            'qty',        sol.qty::numeric,
+            'offsetqty',  sol.offsetqty::numeric,
+            'balance',    GREATEST(0, sol.qty::numeric - sol.offsetqty::numeric),
+            'unitprice',  sol.unitprice::numeric,
+            'amount',     sol.amount::numeric,
+            'uom',        sol.uom,
+            'deliverydate', sol.deliverydate
+          ) ORDER BY sol.seq
+        ) FILTER (WHERE sol.dtlkey IS NOT NULL),
+        '[]'
+      )                                 AS lines
+    FROM sql_salesorders so
+    LEFT JOIN sql_so_lines sol ON sol.dockey = so.dockey
+    WHERE so.status = 0
+      AND so.cancelled = false
+      AND (so.docref3 IS NULL OR UPPER(TRIM(so.docref3)) != 'DONE')
+    GROUP BY so.dockey
+    ORDER BY so.docdate DESC, so.dockey DESC
+  `);
+  return r.rows;
+}
+
+// Sales Invoices
+async function getSalesInvoices() {
+  const r = await q(`
+    SELECT
+      dockey,
+      docno,
+      docdate,
+      code        AS customerCode,
+      companyname,
+      docamt,
+      status,
+      cancelled,
+      docref1,
+      docref2,
+      terms,
+      occ_synced_at AS lastSynced
+    FROM sql_salesinvoices
+    WHERE cancelled = false
+    ORDER BY docdate DESC, dockey DESC
+    LIMIT 500
+  `);
+  return r.rows;
+}
+
+// Delivery Orders
+async function getDeliveryOrders() {
+  const r = await q(`
+    SELECT
+      dockey,
+      docno,
+      docdate,
+      code        AS customerCode,
+      companyname,
+      docamt,
+      status,
+      cancelled,
+      docref1,
+      docref2,
+      occ_synced_at AS lastSynced
+    FROM sql_deliveryorders
+    WHERE cancelled = false
+    ORDER BY docdate DESC, dockey DESC
+    LIMIT 500
+  `);
+  return r.rows;
+}
+
+// Receipt Vouchers
+async function getReceiptVouchers() {
+  const r = await q(`
+    SELECT
+      dockey,
+      docno,
+      docdate,
+      description AS customer,
+      docamt,
+      paymentmethod,
+      status,
+      cancelled,
+      gltransid,
+      occ_synced_at AS lastSynced
+    FROM sql_receiptvouchers
+    WHERE cancelled = false
+    ORDER BY docdate DESC, dockey DESC
+    LIMIT 500
+  `);
+  return r.rows;
+}
+
+// Customers master
+async function getCustomers() {
+  const r = await q(`
+    SELECT
+      code,
+      companyname,
+      creditterm,
+      creditlimit,
+      outstanding,
+      status,
+      area,
+      synced_at AS lastSynced
+    FROM sql_customers
+    WHERE status = 'A'
+    ORDER BY companyname
+  `);
+  return r.rows;
+}
+
+// Stock items master
+async function getStockItems() {
+  const r = await q(`
+    SELECT
+      code,
+      description,
+      stockgroup,
+      uom_code,
+      isactive,
+      balsqty,
+      synced_at AS lastSynced
+    FROM sql_stockitems
+    ORDER BY code
+  `);
+  return r.rows;
+}
+
+// Last sync status
+async function getSyncStatus() {
+  const r = await q(`
+    SELECT sync_type, status, completed_at, records_fetched, records_upserted
+    FROM occ_sync_log
+    WHERE id IN (
+      SELECT MAX(id) FROM occ_sync_log GROUP BY sync_type
+    )
+    ORDER BY sync_type
+  `);
+  return r.rows;
+}
+
+// ── MAIN HANDLER ──────────────────────────────────────────────
 export default async function handler(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  if (req.method === "OPTIONS") return res.status(200).end();
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const client = await getClient();
-  try {
-    if (req.method === "GET") {
-      const type = req.query?.type;
+  const type = req.query?.type;
 
-      if (type === "deals") {
+  // ── GET HANDLERS ────────────────────────────────────────────
+  if (req.method === 'GET') {
+
+    // ── SO + Invoice + DO + RV — now from Postgres ────────────
+    if (type === 'so') {
+      try {
+        const [soList, ivList, doList, rvList, syncStatus] = await Promise.all([
+          getSalesOrders(),
+          getSalesInvoices(),
+          getDeliveryOrders(),
+          getReceiptVouchers(),
+          getSyncStatus(),
+        ]);
+
+        // Find last sync time for updated timestamp
+        const soSync = syncStatus.find(s => s.sync_type === 'SALESORDERS');
+        const updated = soSync?.completed_at?.toISOString() ?? new Date().toISOString();
+
+        return res.status(200).json({
+          so:      soList,
+          invoice: ivList,
+          dos:     doList,
+          rv:      rvList,
+          updated,
+          source:  'postgres',  // flag so frontend knows data source
+        });
+      } catch(e) {
+        console.error('prospects so error:', e.message);
+        // Fallback to Redis if Postgres fails
+        const client = await getRedisClient();
+        try {
+          const [soRaw, ivRaw, doRaw, rvRaw, updatedRaw] = await Promise.all([
+            client.get('mazza_so'),
+            client.get('mazza_invoice'),
+            client.get('mazza_do'),
+            client.get('mazza_rv'),
+            client.get('mazza_so_updated'),
+          ]);
+          return res.status(200).json({
+            so:      soRaw  ? JSON.parse(soRaw)  : [],
+            invoice: ivRaw  ? JSON.parse(ivRaw)  : [],
+            dos:     doRaw  ? JSON.parse(doRaw)  : [],
+            rv:      rvRaw  ? JSON.parse(rvRaw)  : [],
+            updated: updatedRaw || null,
+            source:  'redis_fallback',
+          });
+        } finally {
+          await client.disconnect();
+        }
+      }
+    }
+
+    // ── Master data — now from Postgres ───────────────────────
+    if (type === 'master') {
+      try {
+        const [customers, stockitems] = await Promise.all([
+          getCustomers(),
+          getStockItems(),
+        ]);
+        return res.status(200).json({
+          customers,
+          stockitems,
+          source: 'postgres',
+        });
+      } catch(e) {
+        console.error('prospects master error:', e.message);
+        // Fallback to Redis
+        const client = await getRedisClient();
+        try {
+          const [custRaw, itemsRaw] = await Promise.all([
+            client.get('mazza_customers'),
+            client.get('mazza_stockitems'),
+          ]);
+          return res.status(200).json({
+            customers:  custRaw  ? JSON.parse(custRaw)  : [],
+            stockitems: itemsRaw ? JSON.parse(itemsRaw) : [],
+            source: 'redis_fallback',
+          });
+        } finally {
+          await client.disconnect();
+        }
+      }
+    }
+
+    // ── All other types — still from Redis (OCC-native) ───────
+    const client = await getRedisClient();
+    try {
+
+      if (type === 'deals') {
         const data = await client.get(DEALS_KEY);
         return res.status(200).json({ deals: data ? JSON.parse(data) : [] });
       }
 
-      if (type === "so") {
-        // Full SO + invoice + DO data for Document Tracker and sales dashboard
-        const [soRaw, ivRaw, doRaw, rvRaw, updatedRaw] = await Promise.all([
-          client.get('mazza_so'),
-          client.get('mazza_invoice'),
-          client.get('mazza_do'),
-          client.get('mazza_rv'),
-          client.get('mazza_so_updated'),
-        ]);
-        const soList = soRaw ? JSON.parse(soRaw) : [];
-        const ivList = ivRaw ? JSON.parse(ivRaw) : [];
-        const doList = doRaw ? JSON.parse(doRaw) : [];
-        const rvList = rvRaw ? JSON.parse(rvRaw) : [];
-        // Only return active/open SOs (id = "SO-00320" string after sync-so fix)
-        const openSOs = soList.filter(s => {
-          const st = (s.status||'').toUpperCase();
-          return !st.startsWith('DONE') && !st.startsWith('CANCEL') && st !== 'CANCELLED';
-        });
-        return res.status(200).json({
-          so:      openSOs,
-          invoice: ivList,
-          dos:     doList,
-          rv:      rvList,
-          updated: updatedRaw || null,
-        });
-      }
-
-      if (type === "so_legacy") {
+      if (type === 'so_legacy') {
         const [so, invoice, rv, po, catmap, updated] = await Promise.all([
           client.get('mazza_so'),
           client.get('mazza_invoice'),
@@ -71,29 +315,12 @@ export default async function handler(req, res) {
         });
       }
 
-      if (type === "master") {
-        const [customers, stockitems, custUpdated, itemsUpdated] = await Promise.all([
-          client.get('mazza_customers'),
-          client.get('mazza_stockitems'),
-          client.get('mazza_customers_updated'),
-          client.get('mazza_stockitems_updated'),
-        ]);
-        return res.status(200).json({
-          customers:       customers  ? JSON.parse(customers)  : [],
-          stockitems:      stockitems ? JSON.parse(stockitems) : [],
-          customersUpdated: custUpdated || null,
-          stockUpdated:     itemsUpdated || null,
-        });
-      }
-
-      if (type === "trigger_master_sync") {
-        // Trigger a fresh sync of customers and stock items from SQL
-        // This calls sync-master internally
+      if (type === 'trigger_master_sync') {
         try {
           const syncUrl = process.env.VERCEL_URL
             ? `https://${process.env.VERCEL_URL}/api/sync-master`
             : 'http://localhost:3000/api/sync-master';
-          const r = await fetch(syncUrl, { method:'GET' });
+          const r = await fetch(syncUrl, { method: 'GET' });
           const d = await r.json();
           return res.status(200).json(d);
         } catch(e) {
@@ -101,24 +328,19 @@ export default async function handler(req, res) {
         }
       }
 
-      if (type === "po_intake_list") {
+      if (type === 'po_intake_list') {
         const data = await client.get('mazza_po_intake');
         return res.status(200).json({ list: data ? JSON.parse(data) : [] });
       }
 
-      if (type === "po_list") {
-        // Supplier POs from SQL Account sync
+      if (type === 'po_list') {
         const raw = await client.get('mazza_po');
         const pos = raw ? JSON.parse(raw) : [];
-        // Enrich with line item count and offsetPct from mazza_do matching
-        // SQL Account PO status codes:
-        // 0 = Open, -1 = Partial, 1 = Closed/Done, -10 = Cancelled
         function poStatus(p) {
           const s = p.status;
           if (s === 1   || s === 'Complete' || s === 'Closed') return { label:'Complete', pct:100 };
-          if (s === -10 || s === 'Cancelled' || p.cancelled)   return { label:'Cancelled',pct:100 };
-          if (s === -1  || s === 'Partial')                    return { label:'Partial',  pct:50  };
-          // s === 0 or 'Open' or 'Pending' = genuinely open
+          if (s === -10 || s === 'Cancelled' || p.cancelled)   return { label:'Cancelled', pct:100 };
+          if (s === -1  || s === 'Partial')                    return { label:'Partial', pct:50 };
           return { label:'Open', pct:0 };
         }
         return res.status(200).json({ pos: pos.map(p => {
@@ -137,11 +359,9 @@ export default async function handler(req, res) {
         })});
       }
 
-      if (type === "pv_list") {
-        // Payment vouchers from SQL Account sync
+      if (type === 'pv_list') {
         const raw = await client.get('mazza_pv');
         const pvs = raw ? JSON.parse(raw) : [];
-        // Fallback to receipt vouchers if no PV key
         if (!pvs.length) {
           const rvRaw = await client.get('mazza_rv');
           const rvs = rvRaw ? JSON.parse(rvRaw) : [];
@@ -153,48 +373,55 @@ export default async function handler(req, res) {
         return res.status(200).json({ pvs });
       }
 
-      if (type === "grn_history") {
+      if (type === 'grn_history') {
         const raw = await client.get('mazza_grn_history');
         return res.status(200).json({ list: raw ? JSON.parse(raw) : [] });
       }
 
-      if (type === "pending_grns") {
+      if (type === 'pending_grns') {
         const raw = await client.get('mazza_grn_pending');
         const all = raw ? JSON.parse(raw) : [];
         return res.status(200).json({ grns: all.filter(g => !g.approved) });
       }
 
-      if (type === "bom") {
+      if (type === 'bom') {
         const data = await client.get('mazza_bom');
         return res.status(200).json({ bom: data ? JSON.parse(data) : {} });
       }
 
-      if (type === "demand") {
+      if (type === 'demand') {
         const [dos, po, updated] = await Promise.all([
           client.get('mazza_do'),
           client.get('mazza_po'),
           client.get('mazza_so_updated'),
         ]);
         return res.status(200).json({
-          dos:  dos  ? JSON.parse(dos)  : [],
-          pos:  po   ? JSON.parse(po)   : [],
+          dos:     dos ? JSON.parse(dos) : [],
+          pos:     po  ? JSON.parse(po)  : [],
           updated: updated || null,
         });
       }
 
+      // Default — prospects
       const data = await client.get(PROSPECTS_KEY);
       return res.status(200).json({ prospects: data ? JSON.parse(data) : null });
-    }
 
-    if (req.method === "POST") {
+    } finally {
+      await client.disconnect();
+    }
+  }
+
+  // ── POST HANDLERS — Redis only (OCC-native writes) ───────────
+  if (req.method === 'POST') {
+    const client = await getRedisClient();
+    try {
       const { prospects, deals, po } = req.body;
 
-      // Handle PO intake submission
       if (po !== undefined) {
         const existing = await client.get('mazza_po_intake');
         const list = existing ? JSON.parse(existing) : [];
-        list.unshift(po); // newest first
-        await client.set('mazza_po_intake', JSON.stringify(list.slice(0, 200))); // keep last 200
+        list.unshift(po);
+        await client.set('mazza_po_intake', JSON.stringify(list.slice(0, 200)));
         return res.status(200).json({ success: true, id: po.id });
       }
       if (deals !== undefined) {
@@ -202,17 +429,15 @@ export default async function handler(req, res) {
         return res.status(200).json({ success: true });
       }
       if (!prospects || !Array.isArray(prospects)) {
-        return res.status(400).json({ error: "Invalid data" });
+        return res.status(400).json({ error: 'Invalid data' });
       }
       await client.set(PROSPECTS_KEY, JSON.stringify(prospects));
       return res.status(200).json({ success: true });
-    }
 
-    return res.status(405).json({ error: "Method not allowed" });
-  } catch (err) {
-    console.error("Redis error:", err);
-    return res.status(500).json({ error: err.message });
-  } finally {
-    await client.disconnect();
+    } finally {
+      await client.disconnect();
+    }
   }
+
+  return res.status(405).json({ error: 'Method not allowed' });
 }
