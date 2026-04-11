@@ -1,5 +1,17 @@
 import crypto from 'crypto';
 import { createClient } from 'redis';
+import { Pool } from 'pg';
+
+let _pool = null;
+function getPool() {
+  if (!_pool) _pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 3 });
+  return _pool;
+}
+async function pgQuery(sql, params = []) {
+  const client = await getPool().connect();
+  try { return await client.query(sql, params); }
+  finally { client.release(); }
+}
 
 function sign(key, msg) { return crypto.createHmac('sha256', key).update(msg).digest(); }
 function getSignatureKey(key, d, r, s) { return sign(sign(sign(sign(Buffer.from('AWS4'+key), d), r), s), 'aws4_request'); }
@@ -109,19 +121,42 @@ async function getRedisClient() {
 async function checkExistingInSQL(redis, type, soDocno) {
   if (!soDocno) return null;
   if (type === 'invoice') {
+    // Check Postgres first (authoritative), fall back to Redis
+    try {
+      const r = await pgQuery(
+        'SELECT dockey, docno AS id, docref1 AS soref FROM sql_salesinvoices WHERE docref1 = $1 AND cancelled = false LIMIT 1',
+        [soDocno]
+      );
+      if (r.rows.length > 0) return { id: r.rows[0].id, dockey: r.rows[0].dockey, soRef: soDocno };
+    } catch(e) { /* fall through to Redis */ }
     const raw = await redis.get('mazza_invoice');
     const list = raw ? JSON.parse(raw) : [];
     const found = list.find(iv => iv.soRef === soDocno || iv.docref1 === soDocno || iv.id === soDocno);
     if (found) return found;
   }
   if (type === 'do') {
+    // Check Postgres first (authoritative), fall back to Redis
+    try {
+      const r = await pgQuery(
+        'SELECT dockey, docno AS id, docref1 AS soref FROM sql_deliveryorders WHERE docref1 = $1 AND cancelled = false',
+        [soDocno]
+      );
+      if (r.rows.length > 0) return r.rows.map(row => ({ id: row.id, dockey: row.dockey, soRef: soDocno }));
+    } catch(e) { /* fall through to Redis */ }
     const raw = await redis.get('mazza_do');
     const list = raw ? JSON.parse(raw) : [];
-    // For partial DOs — return ALL DOs for this SO, not just the first
     const found = list.filter(d => d.soRef === soDocno || d.docref1 === soDocno);
-    if (found.length > 0) return found; // returns array for DO
+    if (found.length > 0) return found;
   }
   if (type === 'so') {
+    // Check Postgres first
+    try {
+      const r = await pgQuery(
+        'SELECT dockey, docno AS id, code AS customerCode, companyname AS customer FROM sql_salesorders WHERE docno = $1 LIMIT 1',
+        [soDocno]
+      );
+      if (r.rows.length > 0) return { id: r.rows[0].id, dockey: r.rows[0].dockey, customerCode: r.rows[0].customercode, customer: r.rows[0].customer };
+    } catch(e) { /* fall through to Redis */ }
     const raw = await redis.get('mazza_so');
     const list = raw ? JSON.parse(raw) : [];
     return list.find(s => s.id === soDocno) || null;
@@ -139,6 +174,17 @@ async function resolveCustomerCode(redis, customerCode, soDocno, customerName) {
     const soList = soRaw ? JSON.parse(soRaw) : [];
     const so = soList.find(s => s.id === soDocno || s.docNo === soDocno);
     if (so?.customerCode && so.customerCode !== soDocno) return so.customerCode;
+  }
+
+  // 2b. Postgres fallback — look up customer code from sql_salesorders
+  if (soDocno) {
+    try {
+      const r = await pgQuery(
+        'SELECT code FROM sql_salesorders WHERE docno = $1 LIMIT 1',
+        [soDocno]
+      );
+      if (r.rows.length > 0 && r.rows[0].code) return r.rows[0].code;
+    } catch(e) { /* Postgres unavailable — continue to next fallback */ }
   }
 
   // 3. Look up from mazza_po_intake (OCC-created SOs store customerCode)
@@ -196,10 +242,18 @@ export default async function handler(req, res) {
       // Resolve dockey from docno if needed
       let resolvedDockey = dockey;
       if (!resolvedDockey && docno) {
-        const soRaw = await redis.get('mazza_so');
-        const soList = soRaw ? JSON.parse(soRaw) : [];
-        const so = soList.find(s => s.docNo === docno);
-        resolvedDockey = so?.id;
+        // Try Postgres first
+        try {
+          const r = await pgQuery('SELECT dockey FROM sql_salesorders WHERE docno = $1 LIMIT 1', [docno]);
+          if (r.rows.length > 0) resolvedDockey = r.rows[0].dockey;
+        } catch(e) { /* fall through */ }
+        // Redis fallback
+        if (!resolvedDockey) {
+          const soRaw = await redis.get('mazza_so');
+          const soList = soRaw ? JSON.parse(soRaw) : [];
+          const so = soList.find(s => s.docNo === docno || s.id === docno);
+          resolvedDockey = so?.dockey || so?.id;
+        }
       }
 
       if (!resolvedDockey) {

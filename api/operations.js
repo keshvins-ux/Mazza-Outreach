@@ -1,4 +1,16 @@
 import { createClient } from 'redis';
+import { Pool } from 'pg';
+
+let _pool = null;
+function getPool() {
+  if (!_pool) _pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 3 });
+  return _pool;
+}
+async function pgQuery(sql, params = []) {
+  const c = await getPool().connect();
+  try { return await c.query(sql, params); }
+  finally { c.release(); }
+}
 
 // -- Shared helpers ------------------------------------------------------------
 
@@ -87,10 +99,10 @@ export default async function handler(req, res) {
   await client.connect();
 
   try {
-    const [snapRaw,intakeRaw,soLiveRaw,bomRaw,stockRaw,ivRaw,doRaw] = await Promise.all([
+    const [snapRaw,intakeRaw,_soLiveRaw,bomRaw,stockRaw,ivRaw,doRaw] = await Promise.all([
       client.get('so:by_product'),
       client.get('mazza_po_intake'),
-      client.get('mazza_so'),
+      // mazza_so fetched after — Postgres preferred, Redis fallback
       client.get('mazza_bom'),
       client.get('mazza_stock_balance'),
       client.get('mazza_invoice'),
@@ -99,11 +111,32 @@ export default async function handler(req, res) {
 
     const snap    = snapRaw    ? JSON.parse(snapRaw)    : {};
     const intake  = intakeRaw  ? JSON.parse(intakeRaw)  : [];
-    const soLive  = soLiveRaw  ? JSON.parse(soLiveRaw)  : [];
     const bom     = bomRaw     ? JSON.parse(bomRaw)     : {};
     const stock   = stockRaw   ? JSON.parse(stockRaw)   : {};
     const invoices= ivRaw      ? JSON.parse(ivRaw)      : [];
     const doList  = doRaw      ? JSON.parse(doRaw)      : [];
+
+    // SO live status — Postgres preferred (fresh), Redis fallback (for backward compat)
+    let soLive = [];
+    try {
+      const pgSO = await pgQuery(
+        \`SELECT docno AS id, dockey, docref3 AS statusnote, status, cancelled, agent
+         FROM sql_salesorders
+         WHERE cancelled = false
+         ORDER BY docdate DESC\`
+      );
+      soLive = pgSO.rows.map(s => ({
+        id:      s.id,
+        docNo:   s.id,
+        dockey:  s.dockey,
+        status:  s.cancelled ? 'Cancelled'
+                 : (s.statusnote||'').toUpperCase().trim().startsWith('DONE') ? 'Done'
+                 : 'Active',
+      }));
+    } catch(e) {
+      const soLiveRaw2 = await client.get('mazza_so').catch(()=>null);
+      soLive = soLiveRaw2 ? JSON.parse(soLiveRaw2) : [];
+    }
 
     const liveStatus = {};
     soLive.forEach(s => {
