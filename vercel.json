@@ -22,8 +22,28 @@
       "schedule": "*/20 * * * *"
     },
     {
-      "path": "/api/sync-postgres",
+      "path": "/api/sync-postgres?table=salesorders",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/sync-postgres?table=deliveryorders",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/sync-postgres?table=salesinvoices",
+      "schedule": "*/20 * * * *"
+    },
+    {
+      "path": "/api/sync-postgres?table=receiptvouchers",
+      "schedule": "*/20 * * * *"
+    },
+    {
+      "path": "/api/sync-postgres?table=customers",
+      "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/api/sync-postgres?table=stockitems",
+      "schedule": "0 */6 * * *"
     }
   ]
 }
