@@ -650,6 +650,35 @@ async function syncStatus() {
 // =============================================================
 // HANDLER
 // =============================================================
+
+// Seed sync log from existing Postgres data (run once after migration)
+async function seedSyncLog() {
+  const tables = [
+    { type: 'SALESORDERS',    table: 'sql_salesorders' },
+    { type: 'DELIVERYORDERS', table: 'sql_deliveryorders' },
+    { type: 'SALESINVOICES',  table: 'sql_salesinvoices' },
+    { type: 'RECEIPTVOUCHERS',table: 'sql_receiptvouchers' },
+  ];
+  const results = {};
+  for (const { type, table } of tables) {
+    const r = await q(`
+      SELECT COUNT(*) as cnt, MAX(sql_lastmodified) as maxmod
+      FROM ${table} WHERE sql_lastmodified IS NOT NULL
+    `);
+    const { cnt, maxmod } = r.rows[0];
+    if (maxmod) {
+      await q(`
+        INSERT INTO occ_sync_log
+          (sync_type, endpoint, started_at, completed_at, status,
+           records_fetched, records_upserted, last_lastmodified, duration_ms)
+        VALUES ($1,$2,NOW(),NOW(),'SUCCESS',$3,$3,$4,0)
+      `, [type, '/'+type.toLowerCase(), parseInt(cnt), parseInt(maxmod)]);
+    }
+    results[type] = { count: cnt, maxLastModified: maxmod };
+  }
+  return { seeded: results };
+}
+
 export default async function handler(req, res) {
   const { table } = req.query;
   const startTime = Date.now();
@@ -670,10 +699,11 @@ export default async function handler(req, res) {
       case 'customers':       result = await syncCustomers(); break;
       case 'stockitems':      result = await syncStockItems(); break;
       case 'status':          result = await syncStatus(); break;
+      case 'seed':            result = await seedSyncLog(); break;
       default:
         return res.status(400).json({
           error: 'Missing ?table= parameter',
-          valid: ['salesorders','deliveryorders','salesinvoices','receiptvouchers','customers','stockitems','status']
+          valid: ['salesorders','deliveryorders','salesinvoices','receiptvouchers','customers','stockitems','status','seed']
         });
     }
 
