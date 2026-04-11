@@ -220,7 +220,8 @@ async function syncSalesOrders() {
 
   // Update offsetqty on SO lines for changed SOs (max 5 to stay within time)
   let linesUpdated = 0;
-  for (const dockey of changed.slice(0, 5)) {
+  // Skip line fetching on first run (no lastModified) — lines already migrated
+  for (const dockey of (lastModified ? changed.slice(0, 5) : [])) {
     try {
       const detail = await fetchDetail('/salesorder', dockey);
       if (!detail?.sdsdocdetail?.length) continue;
