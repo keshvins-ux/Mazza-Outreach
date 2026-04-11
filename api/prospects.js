@@ -71,7 +71,10 @@ async function getSalesOrders() {
     WHERE so.status = 0
       AND so.cancelled = false
       AND (so.docref3 IS NULL OR UPPER(TRIM(so.docref3)) != 'DONE')
-    GROUP BY so.dockey
+    GROUP BY
+      so.dockey, so.docno, so.docdate, so.code, so.companyname,
+      so.docamt, so.status, so.cancelled, so.docref1, so.docref2,
+      so.docref3, so.occ_synced_at
     ORDER BY so.docdate DESC, so.dockey DESC
   `);
   return r.rows;
