@@ -30,23 +30,11 @@ async function q(sql, params = []) {
 }
 
 // ── STATUS NORMALISATION ──────────────────────────────────────
-// Postgres stores status as SMALLINT. Frontend expects strings.
-// SO/DO:      0 = Active, -10 = Cancelled (but cancelled=true is authoritative)
-// Invoice:    SQL Account marks paid via receipt voucher offset — no direct status field
-// We derive invoice status from outstanding amount (computed at sync time via sql_raw).
-
 function normaliseSoStatus(row) {
   if (row.cancelled) return 'Cancelled';
   const note = (row.docref3 || '').toUpperCase().trim();
   if (note === 'DONE' || note.startsWith('DONE')) return 'Done';
   return 'Active';
-}
-
-function normaliseInvStatus(row) {
-  // SQL Account invoice outstanding is stored in sql_raw — we don't sync it separately.
-  // Return "Invoiced" as default; the sync can be enhanced later to derive Paid/Overdue.
-  if (row.cancelled) return 'Cancelled';
-  return 'Invoiced';
 }
 
 // ── POSTGRES QUERIES ──────────────────────────────────────────
@@ -95,85 +83,90 @@ async function getSalesOrders() {
     ORDER BY so.docdate DESC, so.dockey DESC
   `);
 
-  // Normalise to the field names the frontend (App.js) has always used
   return r.rows.map(row => ({
-    dockey:       row.dockey,
-    id:           row.docno,           // s.id
-    docNo:        row.docno,           // s.docNo
-    date:         row.docdate ? row.docdate.slice(0,10) : null,  // s.date
-    customer:     row.companyname,     // s.customer
-    companyname:  row.companyname,
-    customerCode: row.customercode,    // s.customerCode
-    amount:       parseFloat(row.docamt) || 0,   // s.amount
-    status:       normaliseSoStatus(row),         // s.status (string)
-    statusRaw:    row.status,
-    cancelled:    row.cancelled,
-    poRef:        row.docref1 || null,            // s.poRef
-    delivery:     row.docref2 || null,            // s.delivery
-    deliveryDateRef: row.docref2 || null,         // s.deliveryDateRef
-    statusNote:   row.docref3 || null,            // s.statusNote
-    agent:        row.agent || null,              // s.agent
-    lastModified: row.occ_synced_at ? new Date(row.occ_synced_at).getTime() / 1000 : null,
-    lines:        row.lines || [],
+    dockey:          row.dockey,
+    id:              row.docno,
+    docNo:           row.docno,
+    date:            row.docdate ? row.docdate.slice(0,10) : null,
+    customer:        row.companyname,
+    companyname:     row.companyname,
+    customerCode:    row.customercode,
+    amount:          parseFloat(row.docamt) || 0,
+    status:          normaliseSoStatus(row),
+    statusRaw:       row.status,
+    cancelled:       row.cancelled,
+    poRef:           row.docref1 || null,
+    delivery:        row.docref2 || null,
+    deliveryDateRef: row.docref2 || null,
+    statusNote:      row.docref3 || null,
+    agent:           row.agent || null,
+    lastModified:    row.occ_synced_at ? new Date(row.occ_synced_at).getTime() / 1000 : null,
+    lines:           row.lines || [],
   }));
 }
 
+// ── FIX: outstanding computed from sql_customers.outstanding ──
+// SQL Account maintains customer.outstanding in real time as payments
+// are received. We prorate it across the customer's invoices by amount.
+// This replaces the previous hardcoded outstanding: 0.
 async function getSalesInvoices() {
   const r = await q(`
     SELECT
       iv.dockey,
       iv.docno,
-      iv.docdate::text          AS docdate,
-      iv.code                   AS customercode,
+      iv.docdate::text                       AS docdate,
+      iv.code                                AS customercode,
       iv.companyname,
-      iv.docamt::numeric        AS docamt,
+      iv.docamt::numeric                     AS docamt,
       iv.status,
       iv.cancelled,
       iv.docref1,
       iv.docref2,
       iv.terms,
       iv.occ_synced_at,
-      COALESCE(c.outstanding::numeric, 0) AS customer_outstanding,
+      COALESCE(c.outstanding::numeric, 0)    AS customer_outstanding,
       SUM(iv2.docamt::numeric) OVER (PARTITION BY iv.code) AS customer_total_invoiced
     FROM sql_salesinvoices iv
     LEFT JOIN sql_customers c ON c.code = iv.code
     LEFT JOIN sql_salesinvoices iv2
-      ON iv2.code = iv.code
-      AND iv2.cancelled = false
+      ON iv2.code = iv.code AND iv2.cancelled = false
     WHERE iv.cancelled = false
     ORDER BY iv.docdate DESC, iv.dockey DESC
     LIMIT 500
   `);
- 
+
   return r.rows.map(row => {
     const amount              = parseFloat(row.docamt) || 0;
     const customerOutstanding = parseFloat(row.customer_outstanding) || 0;
-    const customerTotalInvoiced = parseFloat(row.customer_total_invoiced) || 0;
- 
+    const customerTotal       = parseFloat(row.customer_total_invoiced) || 0;
+
+    // Prorate customer outstanding across their invoices by invoice share
     let outstanding = 0;
-    if (customerOutstanding > 0 && customerTotalInvoiced > 0 && amount > 0) {
-      outstanding = Math.min(amount, (amount / customerTotalInvoiced) * customerOutstanding);
+    if (customerOutstanding > 0 && customerTotal > 0 && amount > 0) {
+      outstanding = Math.min(amount, (amount / customerTotal) * customerOutstanding);
       outstanding = Math.round(outstanding * 100) / 100;
     }
- 
+
+    // Due date from terms
     let dueDate = null;
-    if (row.docdate && row.terms) {
+    if (row.docdate) {
       const d = new Date(row.docdate);
       const t = (row.terms || '').toLowerCase();
-      if      (t.includes('90')) d.setDate(d.getDate() + 90);
-      else if (t.includes('60')) d.setDate(d.getDate() + 60);
-      else if (t.includes('30')) d.setDate(d.getDate() + 30);
-      else if (t.includes('14')) d.setDate(d.getDate() + 14);
+      if      (t.includes('90'))                        d.setDate(d.getDate() + 90);
+      else if (t.includes('60'))                        d.setDate(d.getDate() + 60);
+      else if (t.includes('30'))                        d.setDate(d.getDate() + 30);
+      else if (t.includes('14'))                        d.setDate(d.getDate() + 14);
       else if (t.includes('cod') || t.includes('c.o.d')) outstanding = 0;
-      else d.setDate(d.getDate() + 30);
+      else                                              d.setDate(d.getDate() + 30);
       dueDate = d.toISOString().slice(0, 10);
     }
- 
+
+    // Status
     let status = 'Invoiced';
-    if (row.cancelled)          status = 'Cancelled';
-    else if (outstanding <= 0)  status = 'Paid';
+    if (row.cancelled)         status = 'Cancelled';
+    else if (outstanding <= 0) status = 'Paid';
     else if (dueDate && new Date(dueDate) < new Date()) status = 'Overdue';
- 
+
     return {
       dockey:     row.dockey,
       id:         row.docno,
@@ -188,55 +181,6 @@ async function getSalesInvoices() {
       soRef:      row.docref1 || null,
       terms:      row.terms,
       lastSynced: row.occ_synced_at,
-    };
-  });
-}
-          )
-      ), 0) AS total_paid
-    FROM sql_salesinvoices iv
-    WHERE iv.cancelled = false
-    ORDER BY iv.docdate DESC, iv.dockey DESC
-    LIMIT 500
-  `);
- 
-  return r.rows.map(row => {
-    const amount      = parseFloat(row.docamt) || 0;
-    const totalPaid   = parseFloat(row.total_paid) || 0;
-    const outstanding = Math.max(0, amount - totalPaid);
- 
-    // Compute due date from terms
-    let dueDate = null;
-    if (row.docdate && row.terms) {
-      const d = new Date(row.docdate);
-      const t = (row.terms || '').toLowerCase();
-      if (t.includes('90'))      d.setDate(d.getDate() + 90);
-      else if (t.includes('60')) d.setDate(d.getDate() + 60);
-      else if (t.includes('30')) d.setDate(d.getDate() + 30);
-      else if (t.includes('14')) d.setDate(d.getDate() + 14);
-      else                       d.setDate(d.getDate() + 30);
-      dueDate = d.toISOString().slice(0, 10);
-    }
- 
-    // Derive status from outstanding + due date
-    let status = 'Invoiced';
-    if (row.cancelled)           status = 'Cancelled';
-    else if (outstanding <= 0)   status = 'Paid';
-    else if (dueDate && new Date(dueDate) < new Date()) status = 'Overdue';
- 
-    return {
-      dockey:      row.dockey,
-      id:          row.docno,
-      date:        row.docdate ? row.docdate.slice(0, 10) : null,
-      customer:    row.companyname,
-      code:        row.customercode,
-      amount,
-      outstanding,
-      dueDate,
-      status,
-      cancelled:   row.cancelled,
-      soRef:       row.docref1 || null,
-      terms:       row.terms,
-      lastSynced:  row.occ_synced_at,
     };
   });
 }
@@ -262,15 +206,15 @@ async function getDeliveryOrders() {
   `);
 
   return r.rows.map(row => ({
-    dockey:      row.dockey,
-    id:          row.docno,             // d.id
-    date:        row.docdate ? row.docdate.slice(0,10) : null,
-    customer:    row.companyname,       // d.customer
-    code:        row.customercode,
-    amount:      parseFloat(row.docamt) || 0,
-    cancelled:   row.cancelled,
-    soRef:       row.docref1 || null,   // d.soRef — CRITICAL for Document Tracker
-    lastSynced:  row.occ_synced_at,
+    dockey:     row.dockey,
+    id:         row.docno,
+    date:       row.docdate ? row.docdate.slice(0,10) : null,
+    customer:   row.companyname,
+    code:       row.customercode,
+    amount:     parseFloat(row.docamt) || 0,
+    cancelled:  row.cancelled,
+    soRef:      row.docref1 || null,
+    lastSynced: row.occ_synced_at,
   }));
 }
 
@@ -296,11 +240,11 @@ async function getReceiptVouchers() {
 
   return r.rows.map(row => ({
     dockey:        row.dockey,
-    id:            row.docno,            // rv.id
+    id:            row.docno,
     date:          row.docdate ? row.docdate.slice(0,10) : null,
-    customer:      row.companyname || row.description,  // rv.customer
+    customer:      row.companyname || row.description,
     description:   row.description,
-    amount:        parseFloat(row.docamt) || 0,          // rv.amount
+    amount:        parseFloat(row.docamt) || 0,
     paymentmethod: row.paymentmethod,
     cancelled:     row.cancelled,
     gltransid:     row.gltransid,
@@ -324,7 +268,7 @@ async function getCustomers() {
   `);
   return r.rows.map(row => ({
     code:        row.code,
-    name:        row.companyname,        // frontend uses c.name in some places
+    name:        row.companyname,
     companyname: row.companyname,
     creditterm:  row.creditterm,
     creditlimit: parseFloat(row.creditlimit) || 0,
@@ -351,7 +295,7 @@ async function getStockItems() {
   return r.rows.map(row => ({
     code:        row.code,
     description: row.description,
-    name:        row.description,     // frontend uses s.name in some places
+    name:        row.description,
     stockgroup:  row.stockgroup,
     uom_code:    row.uom_code,
     isactive:    row.isactive,
@@ -383,7 +327,6 @@ export default async function handler(req, res) {
 
   if (req.method === 'GET') {
 
-    // ── SO + Invoice + DO + RV — Postgres ────────────────────
     if (type === 'so') {
       try {
         const [soList, ivList, doList, rvList, syncStatus] = await Promise.all([
@@ -395,24 +338,14 @@ export default async function handler(req, res) {
         ]);
         const soSync  = syncStatus.find(s => s.sync_type === 'SALESORDERS');
         const updated = soSync?.completed_at?.toISOString() ?? new Date().toISOString();
-        return res.status(200).json({
-          so:      soList,
-          invoice: ivList,
-          dos:     doList,
-          rv:      rvList,
-          updated,
-          source:  'postgres',
-        });
+        return res.status(200).json({ so: soList, invoice: ivList, dos: doList, rv: rvList, updated, source: 'postgres' });
       } catch(e) {
         console.error('prospects so error:', e.message);
         const client = await getRedisClient();
         try {
           const [soRaw, ivRaw, doRaw, rvRaw, updatedRaw] = await Promise.all([
-            client.get('mazza_so'),
-            client.get('mazza_invoice'),
-            client.get('mazza_do'),
-            client.get('mazza_rv'),
-            client.get('mazza_so_updated'),
+            client.get('mazza_so'), client.get('mazza_invoice'),
+            client.get('mazza_do'), client.get('mazza_rv'), client.get('mazza_so_updated'),
           ]);
           return res.status(200).json({
             so:      soRaw  ? JSON.parse(soRaw)  : [],
@@ -426,21 +359,16 @@ export default async function handler(req, res) {
       }
     }
 
-    // ── Master data — Postgres ────────────────────────────────
     if (type === 'master') {
       try {
-        const [customers, stockitems] = await Promise.all([
-          getCustomers(),
-          getStockItems(),
-        ]);
+        const [customers, stockitems] = await Promise.all([ getCustomers(), getStockItems() ]);
         return res.status(200).json({ customers, stockitems, source: 'postgres' });
       } catch(e) {
         console.error('prospects master error:', e.message);
         const client = await getRedisClient();
         try {
           const [custRaw, itemsRaw] = await Promise.all([
-            client.get('mazza_customers'),
-            client.get('mazza_stockitems'),
+            client.get('mazza_customers'), client.get('mazza_stockitems'),
           ]);
           return res.status(200).json({
             customers:  custRaw  ? JSON.parse(custRaw)  : [],
@@ -451,7 +379,6 @@ export default async function handler(req, res) {
       }
     }
 
-    // ── Redis-only routes (OCC-native data) ──────────────────
     const client = await getRedisClient();
     try {
 
@@ -462,12 +389,8 @@ export default async function handler(req, res) {
 
       if (type === 'so_legacy') {
         const [so, invoice, rv, po, catmap, updated] = await Promise.all([
-          client.get('mazza_so'),
-          client.get('mazza_invoice'),
-          client.get('mazza_rv'),
-          client.get('mazza_po'),
-          client.get('mazza_catmap'),
-          client.get('mazza_so_updated'),
+          client.get('mazza_so'), client.get('mazza_invoice'), client.get('mazza_rv'),
+          client.get('mazza_po'), client.get('mazza_catmap'), client.get('mazza_so_updated'),
         ]);
         return res.status(200).json({
           so:      so      ? JSON.parse(so)      : [],
@@ -485,11 +408,8 @@ export default async function handler(req, res) {
             ? `https://${process.env.VERCEL_URL}/api/sync-master`
             : 'http://localhost:3000/api/sync-master';
           const r = await fetch(syncUrl, { method: 'GET' });
-          const d = await r.json();
-          return res.status(200).json(d);
-        } catch(e) {
-          return res.status(500).json({ error: e.message });
-        }
+          return res.status(200).json(await r.json());
+        } catch(e) { return res.status(500).json({ error: e.message }); }
       }
 
       if (type === 'po_intake_list') {
@@ -504,22 +424,14 @@ export default async function handler(req, res) {
           const s = p.status;
           if (s === 1   || s === 'Complete' || s === 'Closed') return { label:'Complete', pct:100 };
           if (s === -10 || s === 'Cancelled' || p.cancelled)   return { label:'Cancelled', pct:100 };
-          if (s === -1  || s === 'Partial')                    return { label:'Partial', pct:50 };
+          if (s === -1  || s === 'Partial')                    return { label:'Partial',   pct:50  };
           return { label:'Open', pct:0 };
         }
         return res.status(200).json({ pos: pos.map(p => {
           const st = poStatus(p);
-          return {
-            id:           p.id,
-            supplier:     p.supplier,
-            date:         p.date,
-            amount:       p.amount,
-            status:       st.label,
-            cancelled:    p.cancelled || p.status === -10,
-            deliveryDate: p.delivery || null,
-            itemCount:    p.itemCount || null,
-            offsetPct:    st.pct,
-          };
+          return { id: p.id, supplier: p.supplier, date: p.date, amount: p.amount,
+            status: st.label, cancelled: p.cancelled || p.status === -10,
+            deliveryDate: p.delivery || null, itemCount: p.itemCount || null, offsetPct: st.pct };
         })});
       }
 
@@ -527,8 +439,7 @@ export default async function handler(req, res) {
         const raw = await client.get('mazza_pv');
         const pvs = raw ? JSON.parse(raw) : [];
         if (!pvs.length) {
-          const rvRaw = await client.get('mazza_rv');
-          const rvs = rvRaw ? JSON.parse(rvRaw) : [];
+          const rvs = JSON.parse(await client.get('mazza_rv') || '[]');
           return res.status(200).json({ pvs: rvs.map(r => ({
             id: r.id, description: r.customer, date: r.date, amount: r.amount,
             paymentMethod: '—', journal: '—', cancelled: false,
@@ -555,27 +466,19 @@ export default async function handler(req, res) {
 
       if (type === 'demand') {
         const [dos, po, updated] = await Promise.all([
-          client.get('mazza_do'),
-          client.get('mazza_po'),
-          client.get('mazza_so_updated'),
+          client.get('mazza_do'), client.get('mazza_po'), client.get('mazza_so_updated'),
         ]);
         return res.status(200).json({
-          dos:     dos ? JSON.parse(dos) : [],
-          pos:     po  ? JSON.parse(po)  : [],
-          updated: updated || null,
+          dos: dos ? JSON.parse(dos) : [], pos: po ? JSON.parse(po) : [], updated: updated || null,
         });
       }
 
-      // Default — prospects
       const data = await client.get(PROSPECTS_KEY);
       return res.status(200).json({ prospects: data ? JSON.parse(data) : null });
 
-    } finally {
-      await client.disconnect();
-    }
+    } finally { await client.disconnect(); }
   }
 
-  // ── POST — Redis only (OCC-native writes) ────────────────────
   if (req.method === 'POST') {
     const client = await getRedisClient();
     try {
@@ -591,14 +494,10 @@ export default async function handler(req, res) {
         await client.set(DEALS_KEY, JSON.stringify(deals));
         return res.status(200).json({ success: true });
       }
-      if (!prospects || !Array.isArray(prospects)) {
-        return res.status(400).json({ error: 'Invalid data' });
-      }
+      if (!prospects || !Array.isArray(prospects)) return res.status(400).json({ error: 'Invalid data' });
       await client.set(PROSPECTS_KEY, JSON.stringify(prospects));
       return res.status(200).json({ success: true });
-    } finally {
-      await client.disconnect();
-    }
+    } finally { await client.disconnect(); }
   }
 
   return res.status(405).json({ error: 'Method not allowed' });
