@@ -121,39 +121,88 @@ async function getSalesOrders() {
 async function getSalesInvoices() {
   const r = await q(`
     SELECT
-      dockey,
-      docno,
-      docdate::text AS docdate,
-      code          AS customercode,
-      companyname,
-      docamt::numeric AS docamt,
-      status,
-      cancelled,
-      docref1,
-      docref2,
-      terms,
-      occ_synced_at
-    FROM sql_salesinvoices
-    WHERE cancelled = false
-    ORDER BY docdate DESC, dockey DESC
+      iv.dockey,
+      iv.docno,
+      iv.docdate::text AS docdate,
+      iv.code          AS customercode,
+      iv.companyname,
+      iv.docamt::numeric AS docamt,
+      iv.status,
+      iv.cancelled,
+      iv.docref1,
+      iv.docref2,
+      iv.terms,
+      iv.occ_synced_at,
+      -- Compute outstanding: invoice amount minus all payments received
+      -- RV knockoff data is stored in sql_raw->knockoff[] array
+      -- Each knockoff entry has: knockoffkey (= invoice dockey), knockoffamt
+      COALESCE((
+        SELECT SUM(
+          CASE
+            WHEN jsonb_typeof(rv.sql_raw->'knockoff') = 'array'
+            THEN (
+              SELECT COALESCE(SUM((kn->>'knockoffamt')::numeric), 0)
+              FROM jsonb_array_elements(rv.sql_raw->'knockoff') AS kn
+              WHERE (kn->>'knockoffkey')::integer = iv.dockey
+            )
+            ELSE 0
+          END
+        )
+        FROM sql_receiptvouchers rv
+        WHERE rv.cancelled = false
+          AND rv.sql_raw IS NOT NULL
+          AND rv.sql_raw->'knockoff' IS NOT NULL
+          AND EXISTS (
+            SELECT 1 FROM jsonb_array_elements(rv.sql_raw->'knockoff') kn
+            WHERE (kn->>'knockoffkey')::integer = iv.dockey
+          )
+      ), 0) AS total_paid
+    FROM sql_salesinvoices iv
+    WHERE iv.cancelled = false
+    ORDER BY iv.docdate DESC, iv.dockey DESC
     LIMIT 500
   `);
-
-  return r.rows.map(row => ({
-    dockey:      row.dockey,
-    id:          row.docno,                        // iv.id
-    date:        row.docdate ? row.docdate.slice(0,10) : null,  // iv.date
-    customer:    row.companyname,                  // iv.customer
-    code:        row.customercode,                 // iv.code
-    amount:      parseFloat(row.docamt) || 0,      // iv.amount
-    outstanding: 0,                                // iv.outstanding — 0 until we sync this field
-    dueDate:     null,                             // iv.dueDate — null until we compute from terms
-    status:      normaliseInvStatus(row),          // iv.status (string)
-    cancelled:   row.cancelled,
-    soRef:       row.docref1 || null,              // iv.soRef — Document Tracker cross-ref
-    terms:       row.terms,
-    lastSynced:  row.occ_synced_at,
-  }));
+ 
+  return r.rows.map(row => {
+    const amount      = parseFloat(row.docamt) || 0;
+    const totalPaid   = parseFloat(row.total_paid) || 0;
+    const outstanding = Math.max(0, amount - totalPaid);
+ 
+    // Compute due date from terms
+    let dueDate = null;
+    if (row.docdate && row.terms) {
+      const d = new Date(row.docdate);
+      const t = (row.terms || '').toLowerCase();
+      if (t.includes('90'))      d.setDate(d.getDate() + 90);
+      else if (t.includes('60')) d.setDate(d.getDate() + 60);
+      else if (t.includes('30')) d.setDate(d.getDate() + 30);
+      else if (t.includes('14')) d.setDate(d.getDate() + 14);
+      else                       d.setDate(d.getDate() + 30);
+      dueDate = d.toISOString().slice(0, 10);
+    }
+ 
+    // Derive status from outstanding + due date
+    let status = 'Invoiced';
+    if (row.cancelled)           status = 'Cancelled';
+    else if (outstanding <= 0)   status = 'Paid';
+    else if (dueDate && new Date(dueDate) < new Date()) status = 'Overdue';
+ 
+    return {
+      dockey:      row.dockey,
+      id:          row.docno,
+      date:        row.docdate ? row.docdate.slice(0, 10) : null,
+      customer:    row.companyname,
+      code:        row.customercode,
+      amount,
+      outstanding,
+      dueDate,
+      status,
+      cancelled:   row.cancelled,
+      soRef:       row.docref1 || null,
+      terms:       row.terms,
+      lastSynced:  row.occ_synced_at,
+    };
+  });
 }
 
 async function getDeliveryOrders() {
