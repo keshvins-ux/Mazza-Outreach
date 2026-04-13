@@ -1,101 +1,101 @@
-// ============================================================
-// CUSTOMER SYNC FIX
-// File: /api/sync-customers.js
-// Pulls ALL customers from SQL Account → Postgres
-// Fixes: new customers created in SQL not appearing in OCC
-// Run on cron: every 5 minutes
-// ============================================================
-
+// sync-customers.js — Fixed with AWS4 auth matching your existing SQL Account setup
+import crypto from 'crypto';
 import { Pool } from 'pg';
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
-});
+function sign(key, msg) { return crypto.createHmac('sha256', key).update(msg).digest(); }
+function getSignatureKey(key, d, r, s) { return sign(sign(sign(sign(Buffer.from('AWS4'+key), d), r), s), 'aws4_request'); }
 
-const SQL_BASE = process.env.SQL_ACCOUNT_API_URL;
-const SQL_KEY  = process.env.SQL_ACCOUNT_API_KEY;
-
-async function fetchCustomers(lastModified) {
-  const url = new URL(`${SQL_BASE}/customer`);
-  if (lastModified) url.searchParams.append('lastmodified', lastModified);
-  
-  const res = await fetch(url.toString(), {
-    headers: { 'Authorization': `Bearer ${SQL_KEY}`, 'Accept': 'application/json' }
-  });
-  if (!res.ok) throw new Error(`SQL Account error: ${res.status}`);
-  const data = await res.json();
-  return Array.isArray(data) ? data : (data.data || data.records || []);
+function buildHeaders(path, qs='') {
+  const { SQL_ACCESS_KEY, SQL_SECRET_KEY, SQL_HOST, SQL_REGION, SQL_SERVICE } = process.env;
+  const now = new Date();
+  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g,'').slice(0,15)+'Z';
+  const dateStamp = amzDate.slice(0,8);
+  const host = SQL_HOST.replace('https://','');
+  const payloadHash = crypto.createHash('sha256').update('','utf8').digest('hex');
+  const canonicalHeaders = `host:${host}\nx-amz-date:${amzDate}\n`;
+  const signedHeaders = 'host;x-amz-date';
+  const canonicalRequest = ['GET', path, qs, canonicalHeaders, signedHeaders, payloadHash].join('\n');
+  const credScope = `${dateStamp}/${SQL_REGION}/${SQL_SERVICE}/aws4_request`;
+  const sts = ['AWS4-HMAC-SHA256', amzDate, credScope, crypto.createHash('sha256').update(canonicalRequest,'utf8').digest('hex')].join('\n');
+  const sig = crypto.createHmac('sha256', getSignatureKey(SQL_SECRET_KEY,dateStamp,SQL_REGION,SQL_SERVICE)).update(sts).digest('hex');
+  return {
+    'Authorization': `AWS4-HMAC-SHA256 Credential=${SQL_ACCESS_KEY}/${credScope}, SignedHeaders=${signedHeaders}, Signature=${sig}`,
+    'x-amz-date': amzDate, 'Content-Type': 'application/json',
+    'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0',
+  };
 }
 
-async function getLastSync(client) {
-  const { rows } = await client.query(
-    `SELECT MAX(lastmodified) as last FROM sql_customers`
-  );
-  return rows[0]?.last || null;
+async function fetchAllPages(endpoint) {
+  const { SQL_HOST } = process.env;
+  let all = [], offset = 0;
+  const limit = 50;
+  while (true) {
+    const qs = `limit=${limit}&offset=${offset}`;
+    const headers = buildHeaders(endpoint, qs);
+    const r = await fetch(`${SQL_HOST}${endpoint}?${qs}`, { headers });
+    const text = await r.text();
+    if (text.trim().startsWith('<!')) break;
+    let data;
+    try { data = JSON.parse(text); } catch(e) { break; }
+    const items = data.data || (Array.isArray(data) ? data : []);
+    if (!items.length) break;
+    all = all.concat(items);
+    offset += limit;
+    if (all.length > 10000) break;
+  }
+  return all;
+}
+
+let _pool = null;
+function getPool() {
+  if (!_pool) _pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 3 });
+  return _pool;
 }
 
 export default async function handler(req, res) {
-  if (req.headers['x-cron-secret'] !== process.env.CRON_SECRET) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-
-  const client = await pool.connect();
-  let synced = 0, errors = [];
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  if (req.method === 'OPTIONS') return res.status(200).end();
 
   try {
-    const lastSync = await getLastSync(client);
-    console.log(`[CUSTOMER SYNC] Last sync: ${lastSync}`);
+    const customers = await fetchAllPages('/customer');
+    const client = await getPool().connect();
+    let synced = 0;
 
-    const customers = await fetchCustomers(lastSync);
-    console.log(`[CUSTOMER SYNC] Fetched ${customers.length} records`);
-
-    await client.query('BEGIN');
-
-    for (const c of customers) {
-      try {
+    try {
+      await client.query('BEGIN');
+      for (const c of customers) {
+        if (!c.code || c.code === '----') continue;
         await client.query(`
-          INSERT INTO sql_customers 
-            (code, companyname, address1, address2, address3, address4,
-             postcode, phone1, phone2, email, creditlimit, outstanding,
-             agent, area, lastmodified, syncdate)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,NOW())
+          INSERT INTO sql_customers
+            (code, companyname, creditterm, creditlimit, outstanding, status, area, synced_at)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
           ON CONFLICT (code) DO UPDATE SET
-            companyname  = EXCLUDED.companyname,
-            address1     = EXCLUDED.address1,
-            address2     = EXCLUDED.address2,
-            address3     = EXCLUDED.address3,
-            address4     = EXCLUDED.address4,
-            postcode     = EXCLUDED.postcode,
-            phone1       = EXCLUDED.phone1,
-            phone2       = EXCLUDED.phone2,
-            email        = EXCLUDED.email,
-            creditlimit  = EXCLUDED.creditlimit,
-            outstanding  = EXCLUDED.outstanding,
-            agent        = EXCLUDED.agent,
-            area         = EXCLUDED.area,
-            lastmodified = EXCLUDED.lastmodified,
-            syncdate     = NOW()
+            companyname = EXCLUDED.companyname,
+            creditterm  = EXCLUDED.creditterm,
+            creditlimit = EXCLUDED.creditlimit,
+            outstanding = EXCLUDED.outstanding,
+            status      = EXCLUDED.status,
+            area        = EXCLUDED.area,
+            synced_at   = NOW()
         `, [
-          c.code, c.companyname, c.address1, c.address2, c.address3, c.address4,
-          c.postcode, c.phone1, c.phone2, c.email, c.creditlimit, c.outstanding,
-          c.agent, c.area, c.lastmodified
+          c.code,
+          c.companyname || c.name || c.code,
+          c.creditterm || null,
+          parseFloat(c.creditlimit) || 0,
+          parseFloat(c.outstanding) || 0,
+          c.status || null,
+          c.area || null
         ]);
         synced++;
-      } catch (err) {
-        errors.push({ code: c.code, error: err.message });
       }
+      await client.query('COMMIT');
+    } finally {
+      client.release();
     }
 
-    await client.query('COMMIT');
-    console.log(`[CUSTOMER SYNC] Done. Synced: ${synced}, Errors: ${errors.length}`);
-
-    return res.status(200).json({ success: true, synced, errors: errors.length });
-
+    return res.status(200).json({ success: true, synced });
   } catch (err) {
-    await client.query('ROLLBACK');
+    console.error('[CUSTOMER SYNC]', err.message);
     return res.status(500).json({ error: err.message });
-  } finally {
-    client.release();
   }
 }

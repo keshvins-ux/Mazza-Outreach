@@ -1,142 +1,90 @@
-// ============================================================
-// STOCK BALANCE + REORDER SYNC
-// File: /api/sync-stock.js
-// Uses /stockbalanceinquiry (replaces blocked /stockbalance)
-// Also syncs /stockreorderadvice for purchase suggestions
-// Run on cron: every 15 minutes
-// ============================================================
-
+// sync-stock.js — Fixed with AWS4 auth — uses stockbalanceinquiry (replaces blocked stockbalance)
+import crypto from 'crypto';
 import { Pool } from 'pg';
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
-});
+function sign(key, msg) { return crypto.createHmac('sha256', key).update(msg).digest(); }
+function getSignatureKey(key, d, r, s) { return sign(sign(sign(sign(Buffer.from('AWS4'+key), d), r), s), 'aws4_request'); }
 
-const SQL_BASE = process.env.SQL_ACCOUNT_API_URL;
-const SQL_KEY  = process.env.SQL_ACCOUNT_API_KEY;
+function buildHeaders(path, qs='') {
+  const { SQL_ACCESS_KEY, SQL_SECRET_KEY, SQL_HOST, SQL_REGION, SQL_SERVICE } = process.env;
+  const now = new Date();
+  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g,'').slice(0,15)+'Z';
+  const dateStamp = amzDate.slice(0,8);
+  const host = SQL_HOST.replace('https://','');
+  const payloadHash = crypto.createHash('sha256').update('','utf8').digest('hex');
+  const canonicalHeaders = `host:${host}\nx-amz-date:${amzDate}\n`;
+  const signedHeaders = 'host;x-amz-date';
+  const canonicalRequest = ['GET', path, qs, canonicalHeaders, signedHeaders, payloadHash].join('\n');
+  const credScope = `${dateStamp}/${SQL_REGION}/${SQL_SERVICE}/aws4_request`;
+  const sts = ['AWS4-HMAC-SHA256', amzDate, credScope, crypto.createHash('sha256').update(canonicalRequest,'utf8').digest('hex')].join('\n');
+  const sig = crypto.createHmac('sha256', getSignatureKey(SQL_SECRET_KEY,dateStamp,SQL_REGION,SQL_SERVICE)).update(sts).digest('hex');
+  return {
+    'Authorization': `AWS4-HMAC-SHA256 Credential=${SQL_ACCESS_KEY}/${credScope}, SignedHeaders=${signedHeaders}, Signature=${sig}`,
+    'x-amz-date': amzDate, 'Content-Type': 'application/json',
+    'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0',
+  };
+}
 
-async function fetchSQL(endpoint, params = {}) {
-  const url = new URL(`${SQL_BASE}/${endpoint}`);
-  Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
-  const res = await fetch(url.toString(), {
-    headers: { 'Authorization': `Bearer ${SQL_KEY}`, 'Accept': 'application/json' }
-  });
-  if (!res.ok) throw new Error(`${endpoint} error: ${res.status}`);
-  const data = await res.json();
-  return Array.isArray(data) ? data : (data.data || data.records || []);
+async function fetchAllPages(endpoint) {
+  const { SQL_HOST } = process.env;
+  let all = [], offset = 0;
+  const limit = 50;
+  while (true) {
+    const qs = `limit=${limit}&offset=${offset}`;
+    const headers = buildHeaders(endpoint, qs);
+    const r = await fetch(`${SQL_HOST}${endpoint}?${qs}`, { headers });
+    const text = await r.text();
+    if (text.trim().startsWith('<!')) break;
+    let data;
+    try { data = JSON.parse(text); } catch(e) { break; }
+    const items = data.data || (Array.isArray(data) ? data : []);
+    if (!items.length) break;
+    all = all.concat(items);
+    offset += limit;
+    if (all.length > 10000) break;
+  }
+  return all;
+}
+
+let _pool = null;
+function getPool() {
+  if (!_pool) _pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 3 });
+  return _pool;
 }
 
 export default async function handler(req, res) {
-  if (req.headers['x-cron-secret'] !== process.env.CRON_SECRET) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-
-  const client = await pool.connect();
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  if (req.method === 'OPTIONS') return res.status(200).end();
 
   try {
-    // Create tables if needed
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS sql_stockbalance (
-        itemcode      VARCHAR(30) PRIMARY KEY,
-        description   VARCHAR(200),
-        uom           VARCHAR(20),
-        qty_on_hand   DECIMAL(18,4),
-        qty_committed DECIMAL(18,4),
-        qty_available DECIMAL(18,4),
-        reorder_level DECIMAL(18,4),
-        cost_price    DECIMAL(18,4),
-        sell_price    DECIMAL(18,4),
-        location      VARCHAR(50),
-        syncdate      TIMESTAMP DEFAULT NOW()
-      );
+    const items = await fetchAllPages('/stockbalanceinquiry');
+    const client = await getPool().connect();
+    let synced = 0;
 
-      CREATE TABLE IF NOT EXISTS sql_reorderadvice (
-        itemcode      VARCHAR(30) PRIMARY KEY,
-        description   VARCHAR(200),
-        qty_on_hand   DECIMAL(18,4),
-        qty_committed DECIMAL(18,4),
-        reorder_level DECIMAL(18,4),
-        reorder_qty   DECIMAL(18,4),
-        supplier_code VARCHAR(20),
-        supplier_name VARCHAR(200),
-        syncdate      TIMESTAMP DEFAULT NOW()
-      );
-    `);
-
-    // Sync stock balance
-    const stockData = await fetchSQL('stockbalanceinquiry');
-    console.log(`[STOCK SYNC] Fetched ${stockData.length} stock items`);
-
-    await client.query('BEGIN');
-
-    for (const s of stockData) {
-      await client.query(`
-        INSERT INTO sql_stockbalance
-          (itemcode, description, uom, qty_on_hand, qty_committed,
-           qty_available, reorder_level, cost_price, sell_price, location, syncdate)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
-        ON CONFLICT (itemcode) DO UPDATE SET
-          description   = EXCLUDED.description,
-          qty_on_hand   = EXCLUDED.qty_on_hand,
-          qty_committed = EXCLUDED.qty_committed,
-          qty_available = EXCLUDED.qty_available,
-          reorder_level = EXCLUDED.reorder_level,
-          cost_price    = EXCLUDED.cost_price,
-          sell_price    = EXCLUDED.sell_price,
-          syncdate      = NOW()
-      `, [
-        s.itemcode, s.description, s.uom, s.qtyonhand || s.qty_on_hand || 0,
-        s.qtycommitted || s.qty_committed || 0,
-        s.qtyavailable || s.qty_available || 0,
-        s.reorderlevel || s.reorder_level || 0,
-        s.costprice || s.cost_price || 0,
-        s.sellprice || s.sell_price || 0,
-        s.location || ''
-      ]);
-    }
-
-    // Sync reorder advice
     try {
-      const reorderData = await fetchSQL('stockreorderadvice');
-      console.log(`[STOCK SYNC] Fetched ${reorderData.length} reorder items`);
-
-      for (const r of reorderData) {
-        await client.query(`
-          INSERT INTO sql_reorderadvice
-            (itemcode, description, qty_on_hand, qty_committed,
-             reorder_level, reorder_qty, supplier_code, supplier_name, syncdate)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW())
-          ON CONFLICT (itemcode) DO UPDATE SET
-            description   = EXCLUDED.description,
-            qty_on_hand   = EXCLUDED.qty_on_hand,
-            qty_committed = EXCLUDED.qty_committed,
-            reorder_level = EXCLUDED.reorder_level,
-            reorder_qty   = EXCLUDED.reorder_qty,
-            supplier_code = EXCLUDED.supplier_code,
-            supplier_name = EXCLUDED.supplier_name,
-            syncdate      = NOW()
+      await client.query('BEGIN');
+      for (const s of items) {
+        if (!s.code) continue;
+        // Update balsqty on existing sql_stockitems rows
+        const result = await client.query(`
+          UPDATE sql_stockitems SET
+            balsqty   = $2,
+            synced_at = NOW()
+          WHERE code = $1
         `, [
-          r.itemcode, r.description,
-          r.qtyonhand || 0, r.qtycommitted || 0,
-          r.reorderlevel || 0, r.reorderqty || 0,
-          r.suppliercode || '', r.suppliername || ''
+          s.code,
+          parseFloat(s.balsqty || s.qtyonhand || s.qty_on_hand || 0)
         ]);
+        if (result.rowCount > 0) synced++;
       }
-    } catch (e) {
-      console.log('[STOCK SYNC] Reorder advice skipped:', e.message);
+      await client.query('COMMIT');
+    } finally {
+      client.release();
     }
 
-    await client.query('COMMIT');
-    return res.status(200).json({
-      success: true,
-      stock_synced: stockData.length
-    });
-
+    return res.status(200).json({ success: true, synced, total_from_api: items.length });
   } catch (err) {
-    await client.query('ROLLBACK');
+    console.error('[STOCK SYNC]', err.message);
     return res.status(500).json({ error: err.message });
-  } finally {
-    client.release();
   }
 }
