@@ -123,38 +123,74 @@ async function getSalesInvoices() {
     SELECT
       iv.dockey,
       iv.docno,
-      iv.docdate::text AS docdate,
-      iv.code          AS customercode,
+      iv.docdate::text          AS docdate,
+      iv.code                   AS customercode,
       iv.companyname,
-      iv.docamt::numeric AS docamt,
+      iv.docamt::numeric        AS docamt,
       iv.status,
       iv.cancelled,
       iv.docref1,
       iv.docref2,
       iv.terms,
       iv.occ_synced_at,
-      -- Compute outstanding: invoice amount minus all payments received
-      -- RV knockoff data is stored in sql_raw->knockoff[] array
-      -- Each knockoff entry has: knockoffkey (= invoice dockey), knockoffamt
-      COALESCE((
-        SELECT SUM(
-          CASE
-            WHEN jsonb_typeof(rv.sql_raw->'knockoff') = 'array'
-            THEN (
-              SELECT COALESCE(SUM((kn->>'knockoffamt')::numeric), 0)
-              FROM jsonb_array_elements(rv.sql_raw->'knockoff') AS kn
-              WHERE (kn->>'knockoffkey')::integer = iv.dockey
-            )
-            ELSE 0
-          END
-        )
-        FROM sql_receiptvouchers rv
-        WHERE rv.cancelled = false
-          AND rv.sql_raw IS NOT NULL
-          AND rv.sql_raw->'knockoff' IS NOT NULL
-          AND EXISTS (
-            SELECT 1 FROM jsonb_array_elements(rv.sql_raw->'knockoff') kn
-            WHERE (kn->>'knockoffkey')::integer = iv.dockey
+      COALESCE(c.outstanding::numeric, 0) AS customer_outstanding,
+      SUM(iv2.docamt::numeric) OVER (PARTITION BY iv.code) AS customer_total_invoiced
+    FROM sql_salesinvoices iv
+    LEFT JOIN sql_customers c ON c.code = iv.code
+    LEFT JOIN sql_salesinvoices iv2
+      ON iv2.code = iv.code
+      AND iv2.cancelled = false
+    WHERE iv.cancelled = false
+    ORDER BY iv.docdate DESC, iv.dockey DESC
+    LIMIT 500
+  `);
+ 
+  return r.rows.map(row => {
+    const amount              = parseFloat(row.docamt) || 0;
+    const customerOutstanding = parseFloat(row.customer_outstanding) || 0;
+    const customerTotalInvoiced = parseFloat(row.customer_total_invoiced) || 0;
+ 
+    let outstanding = 0;
+    if (customerOutstanding > 0 && customerTotalInvoiced > 0 && amount > 0) {
+      outstanding = Math.min(amount, (amount / customerTotalInvoiced) * customerOutstanding);
+      outstanding = Math.round(outstanding * 100) / 100;
+    }
+ 
+    let dueDate = null;
+    if (row.docdate && row.terms) {
+      const d = new Date(row.docdate);
+      const t = (row.terms || '').toLowerCase();
+      if      (t.includes('90')) d.setDate(d.getDate() + 90);
+      else if (t.includes('60')) d.setDate(d.getDate() + 60);
+      else if (t.includes('30')) d.setDate(d.getDate() + 30);
+      else if (t.includes('14')) d.setDate(d.getDate() + 14);
+      else if (t.includes('cod') || t.includes('c.o.d')) outstanding = 0;
+      else d.setDate(d.getDate() + 30);
+      dueDate = d.toISOString().slice(0, 10);
+    }
+ 
+    let status = 'Invoiced';
+    if (row.cancelled)          status = 'Cancelled';
+    else if (outstanding <= 0)  status = 'Paid';
+    else if (dueDate && new Date(dueDate) < new Date()) status = 'Overdue';
+ 
+    return {
+      dockey:     row.dockey,
+      id:         row.docno,
+      date:       row.docdate ? row.docdate.slice(0, 10) : null,
+      customer:   row.companyname,
+      code:       row.customercode,
+      amount,
+      outstanding,
+      dueDate,
+      status,
+      cancelled:  row.cancelled,
+      soRef:      row.docref1 || null,
+      terms:      row.terms,
+      lastSynced: row.occ_synced_at,
+    };
+  });
+}
           )
       ), 0) AS total_paid
     FROM sql_salesinvoices iv
