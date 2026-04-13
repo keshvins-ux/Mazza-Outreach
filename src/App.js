@@ -7,6 +7,7 @@ import SalesDashboard from "./SalesDashboard";
 import SalesGrowth from "./SalesGrowth";
 import SalesExecutive from "./SalesExecutive";
 import OperationsHome from "./OperationsHome";
+import POIntakeV2 from "./POIntakeV2";
 
 // --- USER ACCOUNTS ------------------------------------------
 // Users are now stored in Redis — this is just for reference/fallback
@@ -2377,7 +2378,7 @@ function App() {
               </button>
             ))}
           </div>
-          {poSubTab==="intake" && <POIntake currentUser={currentUser} />}
+          {poSubTab==="intake" && <POIntakeV2 currentUser={currentUser} customers={customers} stockItems={stockItems} masterUpdated={masterUpdated} />}
           {poSubTab==="tracker" && <DocumentTracker />}
         </div>
       )}
