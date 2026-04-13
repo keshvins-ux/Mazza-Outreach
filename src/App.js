@@ -2378,7 +2378,7 @@ function App() {
               </button>
             ))}
           </div>
-          {poSubTab==="intake" && <POIntakeV2 currentUser={currentUser} customers={customers} stockItems={stockItems} masterUpdated={masterUpdated} />}
+          {poSubTab==="intake" && <POIntakeV2 currentUser={currentUser} />}
           {poSubTab==="tracker" && <DocumentTracker />}
         </div>
       )}
