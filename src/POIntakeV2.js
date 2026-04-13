@@ -187,7 +187,13 @@ function SearchableSelect({ value, onChange, options, valueKey = "code", labelFn
 }
 
 // ── MAIN COMPONENT ────────────────────────────────────────────
-export default function POIntakeV2({ customers, stockItems, masterUpdated, currentUser, onRefreshMaster }) {
+export default function POIntakeV2({ currentUser }) {
+  // Self-contained — loads its own master data
+  const [customers,        setCustomers]        = useState([]);
+  const [stockItems,       setStockItems]       = useState([]);
+  const [masterUpdated,    setMasterUpdated]    = useState(null);
+  const [syncing,          setSyncing]          = useState(false);
+
   const [stage,            setStage]            = useState("upload");
   const [poFile,           setPoFile]           = useState(null);
   const [poText,           setPoText]           = useState("");
@@ -212,9 +218,21 @@ export default function POIntakeV2({ customers, stockItems, masterUpdated, curre
   const [pdfBase64,        setPdfBase64]        = useState(null);
   const fileRef = useRef(null);
 
+  async function loadMaster() {
+    setSyncing(true);
+    try {
+      const d = await fetch("/api/prospects?type=master").then(r => r.json());
+      setCustomers(d.customers || []);
+      setStockItems((d.stockitems || []).filter(s => s.isactive !== false));
+      setMasterUpdated(d.customersUpdated || d.stockUpdated || null);
+    } catch(e) { console.error("Master load failed:", e.message); }
+    setSyncing(false);
+  }
+
   const inp = { padding: "9px 12px", borderRadius: 8, border: "1px solid #E2E8F0", fontSize: 13, outline: "none", width: "100%", color: "#0F172A", background: "#fff", boxSizing: "border-box" };
 
   useEffect(() => {
+    loadMaster();
     fetch("/api/prospects?type=po_intake_list").then(r => r.json()).then(d => setHistory(d.list || []));
   }, []);
 
@@ -515,6 +533,10 @@ Return ONLY valid JSON:
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <div style={{ fontSize: 11, color: "#94A3B8" }}>{customers.length} customers · {stockItems.length} items</div>
+          <button onClick={loadMaster} disabled={syncing}
+            style={{ padding: "4px 12px", borderRadius: 8, border: "1px solid #E2E8F0", background: "#F8FAFC", color: "#1E3A5F", fontSize: 11, fontWeight: 700, cursor: syncing ? "not-allowed" : "pointer", opacity: syncing ? 0.6 : 1 }}>
+            {syncing ? "⏳ Syncing..." : "🔄 Refresh"}
+          </button>
           <button onClick={() => setShowHistory(!showHistory)}
             style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid #E2E8F0", background: "#F8FAFC", color: "#64748B", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
             {showHistory ? "Hide" : "📋 History"} ({history.length})
