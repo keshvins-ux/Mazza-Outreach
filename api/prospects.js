@@ -322,6 +322,74 @@ async function getSyncStatus() {
   return r.rows;
 }
 
+// ── SO → DO → INV link via fromdockey chain ─────────────────────
+// Returns { soDockeys with DOs, soDockeys with INVs, DO→INV map }
+async function getDocumentLinks() {
+  // DO lines link back to SO via fromdockey
+  const doLinks = await q(`
+    SELECT DISTINCT
+      dol.fromdockey AS so_dockey,
+      do2.docno      AS do_docno,
+      do2.dockey     AS do_dockey,
+      do2.docdate::text AS do_date
+    FROM sql_do_lines dol
+    JOIN sql_deliveryorders do2 ON do2.dockey = dol.dockey
+    WHERE dol.fromdockey IS NOT NULL
+      AND do2.cancelled = false
+  `);
+
+  // INV lines link back to DO via fromdockey
+  const invLinks = await q(`
+    SELECT DISTINCT
+      ivl.fromdockey AS do_dockey,
+      iv.docno       AS inv_docno,
+      iv.dockey      AS inv_dockey,
+      iv.docdate::text AS inv_date
+    FROM sql_inv_lines ivl
+    JOIN sql_salesinvoices iv ON iv.dockey = ivl.dockey
+    WHERE ivl.fromdockey IS NOT NULL
+      AND iv.cancelled = false
+  `);
+
+  // Build SO → DOs map
+  const soDOMap = {};  // so_dockey -> [{ docno, dockey, date }]
+  for (const r of doLinks.rows) {
+    const key = r.so_dockey;
+    if (!soDOMap[key]) soDOMap[key] = [];
+    if (!soDOMap[key].find(d => d.docno === r.do_docno)) {
+      soDOMap[key].push({ docno: r.do_docno, dockey: r.do_dockey, date: r.do_date?.slice(0, 10) });
+    }
+  }
+
+  // Build DO → INVs map
+  const doINVMap = {}; // do_dockey -> [{ docno, dockey, date }]
+  for (const r of invLinks.rows) {
+    const key = r.do_dockey;
+    if (!doINVMap[key]) doINVMap[key] = [];
+    if (!doINVMap[key].find(i => i.docno === r.inv_docno)) {
+      doINVMap[key].push({ docno: r.inv_docno, dockey: r.inv_dockey, date: r.inv_date?.slice(0, 10) });
+    }
+  }
+
+  // Build SO → INVs map (chain through DO)
+  const soINVMap = {}; // so_dockey -> [{ docno, dockey, date }]
+  for (const [soDockey, dos] of Object.entries(soDOMap)) {
+    for (const doEntry of dos) {
+      const invs = doINVMap[doEntry.dockey] || [];
+      if (invs.length) {
+        if (!soINVMap[soDockey]) soINVMap[soDockey] = [];
+        for (const inv of invs) {
+          if (!soINVMap[soDockey].find(i => i.docno === inv.docno)) {
+            soINVMap[soDockey].push(inv);
+          }
+        }
+      }
+    }
+  }
+
+  return { soDOMap, soINVMap };
+}
+
 // ── MAIN HANDLER ──────────────────────────────────────────────
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -335,16 +403,17 @@ export default async function handler(req, res) {
 
     if (type === 'so') {
       try {
-        const [soList, ivList, doList, rvList, syncStatus] = await Promise.all([
+        const [soList, ivList, doList, rvList, syncStatus, docLinks] = await Promise.all([
           getSalesOrders(),
           getSalesInvoices(),
           getDeliveryOrders(),
           getReceiptVouchers(),
           getSyncStatus(),
+          getDocumentLinks(),
         ]);
         const soSync  = syncStatus.find(s => s.sync_type === 'SALESORDERS');
         const updated = soSync?.completed_at?.toISOString() ?? new Date().toISOString();
-        return res.status(200).json({ so: soList, invoice: ivList, dos: doList, rv: rvList, updated, source: 'postgres' });
+        return res.status(200).json({ so: soList, invoice: ivList, dos: doList, rv: rvList, docLinks, updated, source: 'postgres' });
       } catch(e) {
         console.error('prospects so error:', e.message);
         const client = await getRedisClient();
