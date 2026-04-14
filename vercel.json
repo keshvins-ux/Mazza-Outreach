@@ -5,21 +5,17 @@
     }
   },
   "crons": [
-    { "path": "/api/sync-master", "schedule": "0 1 * * *" },
-    { "path": "/api/sync-so", "schedule": "*/15 * * * *" },
-    { "path": "/api/sync-invoices", "schedule": "*/20 * * * *" },
-    { "path": "/api/sync-dos", "schedule": "*/20 * * * *" },
     { "path": "/api/sync-postgres?table=salesorders", "schedule": "*/15 * * * *" },
     { "path": "/api/sync-postgres?table=deliveryorders", "schedule": "*/15 * * * *" },
     { "path": "/api/sync-postgres?table=salesinvoices", "schedule": "*/20 * * * *" },
     { "path": "/api/sync-postgres?table=receiptvouchers", "schedule": "*/20 * * * *" },
-    { "path": "/api/sync-postgres?table=customers", "schedule": "0 */6 * * *" },
-    { "path": "/api/sync-postgres?table=stockitems", "schedule": "0 */6 * * *" },
+    { "path": "/api/sync-postgres?table=customers", "schedule": "*/5 * * * *" },
+    { "path": "/api/sync-postgres?table=stockitems", "schedule": "*/30 * * * *" },
     { "path": "/api/sync-customers", "schedule": "*/5 * * * *" },
-    { "path": "/api/sync-joborders", "schedule": "*/5 * * * *" },
-    { "path": "/api/sync-receiptvouchers", "schedule": "*/5 * * * *" },
     { "path": "/api/sync-stock", "schedule": "*/15 * * * *" },
     { "path": "/api/sync-purchaseorders", "schedule": "*/10 * * * *" },
-    { "path": "/api/sync-grn", "schedule": "*/15 * * * *" }
+    { "path": "/api/sync-grn", "schedule": "*/15 * * * *" },
+    { "path": "/api/sync-joborders", "schedule": "*/5 * * * *" },
+    { "path": "/api/sync-receiptvouchers", "schedule": "*/5 * * * *" }
   ]
 }
