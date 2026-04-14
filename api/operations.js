@@ -1,3 +1,11 @@
+// api/operations.js
+// OCC — Operations API (Production, Gap Analysis, Purchase List)
+//
+// FIXED: Builds so:by_product equivalent from Postgres sql_salesorders + sql_so_lines
+// FIXED: Reads stock balance from sql_stockitems.balsqty instead of Redis mazza_stock_balance
+// FIXED: Reads invoices + DOs from Postgres instead of Redis
+// KEPT:  Reads mazza_po_intake and mazza_bom from Redis (OCC-native data)
+
 import { createClient } from 'redis';
 import { Pool } from 'pg';
 
@@ -51,6 +59,128 @@ function explodeBOM(fgNeeded, bom) {
   return rmNeeded;
 }
 
+// -- Build so:by_product from Postgres ----------------------------------------
+
+async function buildByProductFromPostgres() {
+  const r = await pgQuery(`
+    SELECT
+      so.docno,
+      so.docdate::text AS docdate,
+      so.companyname   AS customer,
+      so.code          AS customercode,
+      so.docref3,
+      so.cancelled,
+      sol.itemcode,
+      sol.description,
+      sol.qty::numeric        AS qty,
+      sol.offsetqty::numeric  AS offsetqty,
+      sol.unitprice::numeric  AS unitprice,
+      sol.amount::numeric     AS amount,
+      sol.uom,
+      sol.deliverydate::text  AS deliverydate
+    FROM sql_salesorders so
+    JOIN sql_so_lines sol ON sol.dockey = so.dockey
+    WHERE so.cancelled = false
+      AND (so.docref3 IS NULL OR UPPER(TRIM(so.docref3)) NOT LIKE 'DONE%')
+      AND sol.itemcode IS NOT NULL
+    ORDER BY so.docdate DESC
+  `);
+
+  const byProduct = {};
+  for (const row of r.rows) {
+    const itemCode = row.itemcode;
+    const qty      = parseFloat(row.qty || 0);
+    const offset   = parseFloat(row.offsetqty || 0);
+    const balance  = Math.max(0, qty - offset);
+    if (balance <= 0) continue;
+
+    const unitPrice = parseFloat(row.unitprice || 0);
+    const amount    = parseFloat(row.amount || 0);
+    const uom       = row.uom || 'UNIT';
+    const desc      = row.description || itemCode;
+    const delDate   = row.deliverydate ? row.deliverydate.slice(0, 10) : null;
+
+    if (!byProduct[itemCode]) {
+      byProduct[itemCode] = {
+        itemCode,
+        description: desc,
+        uom,
+        unitPrice,
+        totalQty: 0,
+        totalValue: 0,
+        orders: [],
+      };
+    }
+    byProduct[itemCode].totalQty   += balance;
+    byProduct[itemCode].totalValue += (balance / Math.max(qty, 1)) * amount;
+    byProduct[itemCode].orders.push({
+      soNo: row.docno,
+      customer: row.customer,
+      qty: balance,
+      unitPrice,
+      uom,
+      date: row.docdate ? row.docdate.slice(0, 10) : null,
+      deliveryDate: delDate,
+      status: 'Active',
+    });
+  }
+  return byProduct;
+}
+
+// -- Build stock balance map from Postgres ------------------------------------
+
+async function buildStockFromPostgres() {
+  const r = await pgQuery(`
+    SELECT code, description, balsqty, stockgroup, defuom_st AS uom, synced_at
+    FROM sql_stockitems
+    WHERE code IS NOT NULL
+  `);
+  const stock = {};
+  let updatedAt = null;
+  for (const row of r.rows) {
+    stock[row.code] = {
+      code: row.code,
+      description: row.description,
+      balance: parseFloat(row.balsqty || 0),
+      group: row.stockgroup,
+      uom: row.uom || 'UNIT',
+    };
+    if (row.synced_at && (!updatedAt || row.synced_at > updatedAt)) {
+      updatedAt = row.synced_at;
+    }
+  }
+  return { stock, updatedAt: updatedAt ? new Date(updatedAt).toISOString() : null };
+}
+
+// -- DOs + Invoices from Postgres ---------------------------------------------
+
+async function getDOsFromPostgres() {
+  const r = await pgQuery(`
+    SELECT docno, companyname AS customer, docdate::text AS docdate, docref1, docref2
+    FROM sql_deliveryorders WHERE cancelled = false ORDER BY docdate DESC
+  `);
+  return r.rows.map(d => ({
+    id: d.docno, customer: d.customer,
+    date: d.docdate ? d.docdate.slice(0, 10) : null,
+    soRef: d.docref1 || d.docref2 || null,
+  }));
+}
+
+async function getInvoicesFromPostgres() {
+  const r = await pgQuery(`
+    SELECT docno, companyname AS customer, code AS customercode,
+           docamt::numeric AS docamt, docdate::text AS docdate
+    FROM sql_salesinvoices WHERE cancelled = false ORDER BY docdate DESC
+  `);
+  return r.rows.map(iv => ({
+    id: iv.docno, customer: iv.customer, code: iv.customercode,
+    amount: parseFloat(iv.docamt) || 0,
+    date: iv.docdate ? iv.docdate.slice(0, 10) : null,
+  }));
+}
+
+// -- getActiveFG ---------------------------------------------------------------
+
 function getActiveFG(snap, intake, liveStatus, fulfilledSoNos) {
   const fgNeeded = {};
   Object.entries(snap).forEach(([code, p]) => {
@@ -86,7 +216,7 @@ function getActiveFG(snap, intake, liveStatus, fulfilledSoNos) {
   return fgNeeded;
 }
 
-// -- Main router ---------------------------------------------------------------
+// -- Main handler --------------------------------------------------------------
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin','*');
@@ -99,31 +229,27 @@ export default async function handler(req, res) {
   await client.connect();
 
   try {
-    const [snapRaw,intakeRaw,_soLiveRaw,bomRaw,stockRaw,ivRaw,doRaw] = await Promise.all([
-      client.get('so:by_product'),
+    // ── DATA: Postgres for SQL Account data, Redis for OCC-native ─────────
+    const [snap, { stock, updatedAt: stockUpdatedAt }, invoices, doList, intakeRaw, bomRaw] = await Promise.all([
+      buildByProductFromPostgres(),
+      buildStockFromPostgres(),
+      getInvoicesFromPostgres(),
+      getDOsFromPostgres(),
       client.get('mazza_po_intake'),
-      // mazza_so fetched after — Postgres preferred, Redis fallback
       client.get('mazza_bom'),
-      client.get('mazza_stock_balance'),
-      client.get('mazza_invoice'),
-      client.get('mazza_do'),
     ]);
 
-    const snap    = snapRaw    ? JSON.parse(snapRaw)    : {};
-    const intake  = intakeRaw  ? JSON.parse(intakeRaw)  : [];
-    const bom     = bomRaw     ? JSON.parse(bomRaw)     : {};
-    const stock   = stockRaw   ? JSON.parse(stockRaw)   : {};
-    const invoices= ivRaw      ? JSON.parse(ivRaw)      : [];
-    const doList  = doRaw      ? JSON.parse(doRaw)      : [];
+    const intake = intakeRaw ? JSON.parse(intakeRaw) : [];
+    const bom    = bomRaw    ? JSON.parse(bomRaw)    : {};
 
-    // SO live status — Postgres preferred (fresh), Redis fallback (for backward compat)
+    // SO live status
     let soLive = [];
     try {
       const pgSO = await pgQuery(
-        \`SELECT docno AS id, dockey, docref3 AS statusnote, status, cancelled, agent
+        `SELECT docno AS id, dockey, docref3 AS statusnote, status, cancelled, agent
          FROM sql_salesorders
          WHERE cancelled = false
-         ORDER BY docdate DESC\`
+         ORDER BY docdate DESC`
       );
       soLive = pgSO.rows.map(s => ({
         id:      s.id,
@@ -140,43 +266,20 @@ export default async function handler(req, res) {
 
     const liveStatus = {};
     soLive.forEach(s => {
-      // Index by both the SO number string (s.id = "SO-00320") and dockey integer
-      // so:by_product stores orders with soNo = docNo string
-      liveStatus[s.id]     = s.status||'Active';  // "SO-00320" -> status
-      liveStatus[s.dockey] = s.status||'Active';  // 8 -> status (backward compat)
-      if (s.docNo) liveStatus[s.docNo] = s.status||'Active'; // extra safety
+      liveStatus[s.id]     = s.status||'Active';
+      liveStatus[s.dockey] = s.status||'Active';
+      if (s.docNo) liveStatus[s.docNo] = s.status||'Active';
     });
 
-    // Build set of SO numbers that are fulfilled — i.e. a DO exists for that SO.
-    // Since soRef on DOs contains customer PO numbers (not SO docnos), we match
-    // by cross-referencing: find SOs whose docno appears in the snapshot and
-    // check if a DO exists for the same customer within a reasonable date window.
-    // Simpler approach: use the snapshot orders and check if ANY DO exists for
-    // that customer after the SO date (within 60 days) — this handles the TG case.
-    //
-    // Most reliable: mark SO as fulfilled if it has status DONE/CANCEL or
-    // if the snapshot order date is older than 90 days (goods long overdue = likely sent).
-    // For TG specifically: status in liveStatus should be updated when DO is created.
-    //
-    // Best fix: check mazza_do for matching customer+date combination.
     const doCustomerSet = new Set(doList.map(d => (d.customer||'').toUpperCase().trim()));
-
-    // Build fulfilled SO set: SOs where a DO exists for the same customer
-    // AND the SO delivery date has passed (goods were sent)
     const today = new Date();
     const fulfilledSoNos = new Set();
     Object.entries(snap).forEach(([code, p]) => {
       (p.orders||[]).forEach(o => {
-        if (isDone(liveStatus[o.soNo])) {
-          fulfilledSoNos.add(o.soNo);
-          return;
-        }
-        // If delivery date has passed AND a DO exists for this customer → fulfilled
+        if (isDone(liveStatus[o.soNo])) { fulfilledSoNos.add(o.soNo); return; }
         if (o.deliveryDate) {
           const delDate = new Date(o.deliveryDate);
-          const isPastDue = delDate < today;
-          const customerHasDO = doCustomerSet.has((o.customer||'').toUpperCase().trim());
-          if (isPastDue && customerHasDO) {
+          if (delDate < today && doCustomerSet.has((o.customer||'').toUpperCase().trim())) {
             fulfilledSoNos.add(o.soNo);
           }
         }
@@ -244,7 +347,7 @@ export default async function handler(req, res) {
 
       const phasedOut = Object.entries(snap).filter(([code])=>!activeSnap[code]).map(([code,p])=>({itemCode:code,description:p.description,totalQty:p.totalQty,totalValue:p.totalValue}));
 
-      return res.status(200).json({ products, totals, phasedOut, meta:{ snapshotActive:Object.keys(activeSnap).length, snapshotPhasedOut:phasedOut.length, fromPoIntake:Object.keys(intakeProds).length, merged:products.length, updatedAt:new Date().toISOString() }});
+      return res.status(200).json({ products, totals, phasedOut, meta:{ snapshotActive:Object.keys(activeSnap).length, snapshotPhasedOut:phasedOut.length, fromPoIntake:Object.keys(intakeProds).length, merged:products.length, source:'postgres', updatedAt:new Date().toISOString() }});
     }
 
     // -- GAP ANALYSIS ----------------------------------------------------------
@@ -277,7 +380,6 @@ export default async function handler(req, res) {
         return { ...rm, onHand, gap, status, pct:rm.needed>0?Math.min(Math.round((onHand/rm.needed)*100),999):100, totalCost:gap*(rm.refCost||0) };
       }).sort((a,b)=>{ const o={short:0,low:1,ok:2}; if(o[a.status]!==o[b.status])return o[a.status]-o[b.status]; return b.totalCost-a.totalCost; });
 
-      const stockUpdatedAt = await client.get('mazza_stock_balance_updated');
       return res.status(200).json({ fgGap, rmGap, summary:{ totalFG:fgGap.length, canFulfil:fgGap.filter(f=>f.canFulfil).length, cannotFulfil:fgGap.filter(f=>!f.canFulfil).length, rmShort:rmGap.filter(r=>r.status==='short').length, stockUpdatedAt }});
     }
 
@@ -297,7 +399,6 @@ export default async function handler(req, res) {
       }).sort((a,b)=>{ const o={critical:0,buy:1,sufficient:2}; if(o[a.status]!==o[b.status])return o[a.status]-o[b.status]; return b.estCost-a.estCost; });
 
       const totals = { totalItems:items.length, toBuy:items.filter(i=>i.status!=='sufficient').length, critical:items.filter(i=>i.status==='critical').length, sufficient:items.filter(i=>i.status==='sufficient').length, estTotalCost:items.reduce((s,i)=>s+i.estCost,0) };
-      const stockUpdatedAt = await client.get('mazza_stock_balance_updated');
       return res.status(200).json({ items, totals, stockUpdatedAt });
     }
 

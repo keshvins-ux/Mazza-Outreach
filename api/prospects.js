@@ -110,6 +110,8 @@ async function getSalesOrders() {
 // are received. We prorate it across the customer's invoices by amount.
 // This replaces the previous hardcoded outstanding: 0.
 async function getSalesInvoices() {
+  // Fixed: use a subquery for customer_total_invoiced instead of a self-join
+  // which caused a cartesian product (each invoice row × N invoices for same customer)
   const r = await q(`
     SELECT
       iv.dockey,
@@ -125,11 +127,15 @@ async function getSalesInvoices() {
       iv.terms,
       iv.occ_synced_at,
       COALESCE(c.outstanding::numeric, 0)    AS customer_outstanding,
-      SUM(iv2.docamt::numeric) OVER (PARTITION BY iv.code) AS customer_total_invoiced
+      COALESCE(ct.total_invoiced, 0)         AS customer_total_invoiced
     FROM sql_salesinvoices iv
     LEFT JOIN sql_customers c ON c.code = iv.code
-    LEFT JOIN sql_salesinvoices iv2
-      ON iv2.code = iv.code AND iv2.cancelled = false
+    LEFT JOIN (
+      SELECT code, SUM(docamt::numeric) AS total_invoiced
+      FROM sql_salesinvoices
+      WHERE cancelled = false
+      GROUP BY code
+    ) ct ON ct.code = iv.code
     WHERE iv.cancelled = false
     ORDER BY iv.docdate DESC, iv.dockey DESC
     LIMIT 500
