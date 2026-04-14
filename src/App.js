@@ -1610,7 +1610,7 @@ function App() {
       )}
 
       {/* --- OPS HOME --- */}
-      {tab==="ops_home" && <OperationsHome currentUser={currentUser} onNavigate={(t,sub)=>{ setPortal(t==="production"||t==="procurement"?"ops":"sales"); setTab(t); if(sub) setOpsView(sub); }} />}
+      {tab==="ops_home" && <OperationsHome currentUser={currentUser} onNavigate={(t,sub)=>{ setPortal(t==="production"||t==="procurement"?"ops":t==="po"?(portal||"ops"):"sales"); setTab(t); if(t==="production"&&sub) setOpsView(sub); if(t==="po"&&sub==="tracker") setPoSubTab("tracker"); }} />}
 
       {tab==="dashboard" && (
         <div style={{padding:isMobile?"14px":"28px",maxWidth:1240,margin:"0 auto"}}>

@@ -131,7 +131,7 @@ export default function OperationsHome({ currentUser, onNavigate }) {
               <div style={{fontSize:14,fontWeight:800,color:"#0F172A"}}>🏭 Production Priorities</div>
               <div style={{fontSize:11,color:"#94A3B8",marginTop:2}}>Sorted by delivery date</div>
             </div>
-            <button onClick={()=>onNavigate&&onNavigate("ops","schedule")} style={{fontSize:11,color:"#1d4ed8",background:"none",border:"none",cursor:"pointer",fontWeight:700}}>See all →</button>
+            <button onClick={()=>onNavigate&&onNavigate("production","schedule")} style={{fontSize:11,color:"#1d4ed8",background:"none",border:"none",cursor:"pointer",fontWeight:700}}>See all →</button>
           </div>
           {topJobs.length===0 ? <div style={{color:"#94A3B8",fontSize:12,textAlign:"center",padding:16}}>No active jobs</div> :
             topJobs.map((p,i)=>{
@@ -198,7 +198,7 @@ export default function OperationsHome({ currentUser, onNavigate }) {
               <div style={{fontSize:14,fontWeight:800,color:"#0F172A"}}>🛒 Purchase Today</div>
               <div style={{fontSize:11,color:"#94A3B8",marginTop:2}}>{toBuy} raw materials to order</div>
             </div>
-            <button onClick={()=>onNavigate&&onNavigate("ops","purchase")} style={{fontSize:11,color:"#1d4ed8",background:"none",border:"none",cursor:"pointer",fontWeight:700}}>See all →</button>
+            <button onClick={()=>onNavigate&&onNavigate("production","purchase")} style={{fontSize:11,color:"#1d4ed8",background:"none",border:"none",cursor:"pointer",fontWeight:700}}>See all →</button>
           </div>
           {critical.length===0 && toBuy===0 ? (
             <div style={{color:"#16a34a",fontSize:12,textAlign:"center",padding:12,fontWeight:700}}>✅ Stock levels sufficient</div>
@@ -221,12 +221,12 @@ export default function OperationsHome({ currentUser, onNavigate }) {
         <div style={{fontSize:12,color:"#94A3B8",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:10}}>Quick Navigate</div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10}}>
           {[
-            {icon:"🖥️", label:"Floor Display",      sub:"Production floor",        tab:"ops",  sub2:"floor"},
-            {icon:"📦", label:"Gap Analysis",        sub:"Stock vs demand",         tab:"ops",  sub2:"gap"},
-            {icon:"🛒", label:"Purchase List",       sub:"What to buy",             tab:"ops",  sub2:"purchase"},
+            {icon:"🖥️", label:"Floor Display",      sub:"Production floor",        tab:"production",  sub2:"floor"},
+            {icon:"📦", label:"Gap Analysis",        sub:"Stock vs demand",         tab:"production",  sub2:"gap"},
+            {icon:"🛒", label:"Purchase List",       sub:"What to buy",             tab:"production",  sub2:"purchase"},
             {icon:"📥", label:"Log GRN",             sub:"Record goods received",   tab:"procurement"},
             {icon:"📋", label:"Document Tracker",    sub:"Missing INV & DO",        tab:"po",   sub2:"tracker"},
-            {icon:"⚙️", label:"Capacity Planner",    sub:"Machine utilisation",     tab:"ops",  sub2:"capacity"},
+            {icon:"⚙️", label:"Capacity Planner",    sub:"Machine utilisation",     tab:"production",  sub2:"capacity"},
           ].map(n=>(
             <button key={n.label} onClick={()=>onNavigate&&onNavigate(n.tab,n.sub2)}
               style={{background:"#fff",borderRadius:12,padding:"14px 16px",border:"1px solid #E2E8F0",cursor:"pointer",textAlign:"left",display:"flex",gap:10,alignItems:"center"}}>
