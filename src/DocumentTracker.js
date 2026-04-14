@@ -3,9 +3,6 @@ import React, { useState, useEffect } from "react";
 const fmtDate = d => d ? new Date(d).toLocaleDateString("en-MY",{day:"2-digit",month:"short",year:"numeric"}) : "—";
 const fmtRM   = n => `RM ${Number(n||0).toLocaleString("en-MY",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
 
-// Normalise SO status from either Postgres (integer) or old Redis (string)
-// Postgres: status SMALLINT (0=Active, -10=Cancelled?), cancelled BOOLEAN
-// Old Redis: status string "Cancelled", "Done", "Active"
 function isSoCancelled(so) {
   if (so.cancelled === true) return true;
   if (typeof so.status === "number") return so.status === -10;
@@ -14,8 +11,6 @@ function isSoCancelled(so) {
 }
 
 function isSoDone(so) {
-  // statusNote contains "DONE" (used in Postgres path via docref3)
-  // or old Redis status string starts with "Done"
   if (typeof so.statusNote === "string" && so.statusNote.toUpperCase().startsWith("DONE")) return true;
   if (typeof so.status === "string" && so.status.toUpperCase().startsWith("DONE")) return true;
   return false;
@@ -156,7 +151,6 @@ function CreateDocPanel({ entry, onDone, onClose }) {
   const needsInv = !entry.invoiceNo;
   const needsDO  = !entry.doNo;
 
-  // Build payload — use actual SO line items if available, otherwise fall back to SO total
   const items = entry.items?.length ? entry.items.map(it => ({
     itemcode:    it.itemcode || "MISC",
     description: it.description || "Sales Order Items",
@@ -256,21 +250,18 @@ function CreateDocPanel({ entry, onDone, onClose }) {
       {error && <div style={{background:"#FEF2F2", borderRadius:8, padding:"8px 12px", border:"1px solid #FECACA", fontSize:12, color:"#dc2626", marginBottom:12}}>{error}</div>}
 
       <div style={{display:"flex", gap:8, flexWrap:"wrap"}}>
-        {/* Full DO */}
         {needsDO && !doCreated && (
           <button onClick={createDO} disabled={creating}
             style={{flex:1, padding:"11px", background:creating?"#CBD5E1":"#d97706", border:"none", borderRadius:10, color:"#fff", fontSize:13, fontWeight:800, cursor:creating?"not-allowed":"pointer"}}>
             {creating ? "Creating..." : "📦 Create DO (Full)"}
           </button>
         )}
-        {/* Partial DO — always available if DO needed */}
         {needsDO && !doCreated && (
           <button onClick={()=>setShowPartial(true)} disabled={creating}
             style={{flex:1, padding:"11px", background:creating?"#CBD5E1":"#7c3aed", border:"none", borderRadius:10, color:"#fff", fontSize:13, fontWeight:800, cursor:creating?"not-allowed":"pointer"}}>
             📦 Partial DO
           </button>
         )}
-        {/* Invoice — only after DO created or if DO already existed */}
         {(doCreated || !needsDO) && needsInv && !invCreated && (
           <button onClick={createInvoice} disabled={creating}
             style={{flex:1, padding:"11px", background:creating?"#CBD5E1":"#1E3A5F", border:"none", borderRadius:10, color:"#fff", fontSize:13, fontWeight:800, cursor:creating?"not-allowed":"pointer"}}>
@@ -286,17 +277,85 @@ function CreateDocPanel({ entry, onDone, onClose }) {
   );
 }
 
+// --- SO row component --------------------------------------------------------
+function SORow({ e, i, expanded, setExpanded, load, isHistory }) {
+  const hasInv    = !!e.invoiceNo;
+  const hasDO     = !!e.doNo;
+  const isComplete= hasInv && hasDO;
+  const isExp     = expanded === e.soNo + i;
+  const rowBg     = isExp ? "#EFF6FF" : isComplete ? "#F0FDF4" : (!hasInv&&!hasDO) ? "#FEF2F2" : "#FFFBEB";
+  const canCreate = !isComplete && !isHistory;
+
+  return (
+    <React.Fragment key={e.soNo+i}>
+      <tr style={{borderTop:"1px solid #F1F5F9", background:rowBg, cursor:canCreate?"pointer":"default"}}
+        onClick={()=>canCreate && setExpanded(isExp ? null : e.soNo+i)}>
+        <td style={{padding:"10px 12px"}}>
+          {e.source==="occ"
+            ? <span style={{fontSize:10, background:"#DBEAFE", color:"#1d4ed8", padding:"2px 7px", borderRadius:99, fontWeight:700}}>OCC</span>
+            : <span style={{fontSize:10, background:"#F1F5F9", color:"#64748B", padding:"2px 7px", borderRadius:99, fontWeight:700}}>SQL</span>
+          }
+        </td>
+        <td style={{padding:"10px 12px", fontWeight:800, color:"#1E3A5F"}}>{e.soNo}</td>
+        <td style={{padding:"10px 12px", fontWeight:500, maxWidth:180, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>{e.customer}</td>
+        <td style={{padding:"10px 12px", fontWeight:600}}>{e.amount ? fmtRM(e.amount) : "—"}</td>
+        <td style={{padding:"10px 12px", color:"#64748B", whiteSpace:"nowrap"}}>{fmtDate(e.date)}</td>
+        <td style={{padding:"10px 12px"}}>
+          {hasInv
+            ? <span style={{fontWeight:700, color:"#1d4ed8", fontSize:12}}>{e.invoiceNo}</span>
+            : <span style={{fontSize:10, background:"#FEF3C7", color:"#92400E", padding:"3px 8px", borderRadius:99, fontWeight:700}}>⏳ Missing</span>
+          }
+        </td>
+        <td style={{padding:"10px 12px"}}>
+          {hasDO
+            ? <span style={{fontWeight:700, color:"#7c3aed", fontSize:12}}>{e.doNo}</span>
+            : <span style={{fontSize:10, background:"#EDE9FE", color:"#6d28d9", padding:"3px 8px", borderRadius:99, fontWeight:700}}>⏳ Missing</span>
+          }
+        </td>
+        <td style={{padding:"10px 12px", color:"#64748B", whiteSpace:"nowrap"}}>{e.deliveryDate||"—"}</td>
+        <td style={{padding:"10px 12px"}}>
+          {isComplete ? (
+            <span style={{fontSize:10, background:"#F0FDF4", color:"#16a34a", padding:"2px 8px", borderRadius:99, fontWeight:700}}>✅ Complete</span>
+          ) : isHistory ? (
+            <span style={{fontSize:10, background:"#F1F5F9", color:"#94A3B8", padding:"2px 8px", borderRadius:99, fontWeight:700}}>Done</span>
+          ) : (
+            <button onClick={ev=>{ev.stopPropagation(); setExpanded(isExp?null:e.soNo+i);}}
+              style={{padding:"5px 12px", borderRadius:8, border:"none", cursor:"pointer", fontSize:11, fontWeight:700,
+                background:isExp?"#1E3A5F":"#EFF6FF", color:isExp?"#fff":"#1d4ed8"}}>
+              {isExp ? "▲ Close" : (!hasInv&&!hasDO) ? "➕ Create DO + INV" : !hasInv ? "➕ Create Invoice" : "➕ Create DO"}
+            </button>
+          )}
+        </td>
+      </tr>
+
+      {isExp && (
+        <tr>
+          <td colSpan={9} style={{padding:"0 16px 16px 52px", background:"#EFF6FF", borderBottom:"2px solid #BFDBFE"}}>
+            <CreateDocPanel
+              entry={e}
+              onClose={()=>setExpanded(null)}
+              onDone={()=>{ setExpanded(null); setTimeout(load, 1500); }}
+            />
+          </td>
+        </tr>
+      )}
+    </React.Fragment>
+  );
+}
+
 // --- MAIN DOCUMENT TRACKER ----------------------------------------------------
 export default function DocumentTracker() {
   const [occ,      setOcc]      = useState([]);
   const [allSOs,   setAllSOs]   = useState([]);
   const [invoices, setInvoices] = useState([]);
   const [dos,      setDos]      = useState([]);
+  const [docLinks, setDocLinks] = useState(null);
   const [loading,  setLoading]  = useState(true);
   const [search,   setSearch]   = useState("");
   const [filter,   setFilter]   = useState("all");
   const [source,   setSource]   = useState("all");
   const [expanded, setExpanded] = useState(null);
+  const [showHistory, setShowHistory] = useState(false);
 
   function load() {
     setLoading(true);
@@ -308,80 +367,88 @@ export default function DocumentTracker() {
       setAllSOs(sqlData.so || []);
       setInvoices(sqlData.invoice || []);
       setDos(sqlData.dos || []);
+      setDocLinks(sqlData.docLinks || null);
       setLoading(false);
     }).catch(()=>setLoading(false));
   }
 
   useEffect(()=>{ load(); }, []);
 
-  // Cross-reference: invoice & DO -> which SO they belong to
-  const invoiceMap = {};
-  invoices.forEach(iv => { if(iv.soRef) invoiceMap[iv.soRef] = iv.id; });
-  const doMap = {};
-  dos.forEach(d => { if(d.soRef) doMap[d.soRef] = d.id; });
+  // ── Cross-reference using fromdockey chain (accurate) ──────────
+  // docLinks.soDOMap:  { so_dockey: [{ docno, dockey, date }] }
+  // docLinks.soINVMap: { so_dockey: [{ docno, dockey, date }] }
+  const soDOMap  = docLinks?.soDOMap  || {};
+  const soINVMap = docLinks?.soINVMap || {};
 
-  // OCC-logged entries (submitted via PO Intake)
-  const occEntries = occ.map(e => ({
-    soNo:         e.docno || "—",
-    dockey:       e.dockey || null,
-    customer:     e.customerName || "—",
-    customerCode: e.customerCode || null,
-    poRef:        e.poNumber || "—",
-    amount:       e.totalAmount || 0,
-    date:         e.submittedAt,
-    invoiceNo:    e.invoiceNo || invoiceMap[e.docno] || null,
-    doNo:         e.doNo || doMap[e.docno] || null,
-    doList:       e.doList || [],
-    deliveryDate: e.deliveryDate || null,
-    submittedBy:  e.submittedBy || "—",
-    items:        e.items || [],
-    source:       "occ",
-  }));
+  // Build entries from OCC PO Intake submissions
+  const occEntries = occ.map(e => {
+    const doList  = soDOMap[e.dockey]  || [];
+    const invList = soINVMap[e.dockey] || [];
+    return {
+      soNo:         e.docno || "—",
+      dockey:       e.dockey || null,
+      customer:     e.customerName || "—",
+      customerCode: e.customerCode || null,
+      poRef:        e.poNumber || "—",
+      amount:       e.totalAmount || 0,
+      date:         e.submittedAt,
+      invoiceNo:    invList.length ? invList.map(i=>i.docno).join(", ") : null,
+      doNo:         doList.length  ? doList.map(d=>d.docno).join(", ")  : null,
+      doList:       e.doList || doList,
+      deliveryDate: e.deliveryDate || null,
+      submittedBy:  e.submittedBy || "—",
+      items:        e.items || [],
+      source:       "occ",
+    };
+  });
 
-  // SQL-only SOs (in SQL Account but not logged via OCC PO Intake)
-  // Filter out cancelled and "done" SOs — handle both Postgres integer and old string format
+  // Build entries from SQL Account SOs (not in OCC)
   const occSoNos = new Set(occ.map(e=>e.docno).filter(Boolean));
   const sqlOnlyEntries = allSOs
     .filter(so => {
-      if (occSoNos.has(so.id)) return false;          // already in OCC
-      if (isSoCancelled(so))   return false;          // cancelled
-      if (isSoDone(so))        return false;          // already done
-      return true;
+      if (occSoNos.has(so.id)) return false;
+      if (isSoCancelled(so))   return false;
+      return true;   // include DONE ones — they go to History
     })
-    .map(so => ({
-      soNo:         so.id,
-      dockey:       so.dockey || null,
-      customer:     so.customer || so.companyname || "—",
-      customerCode: so.customerCode || null,
-      poRef:        so.poRef || "—",
-      amount:       so.amount || 0,
-      date:         so.date,
-      invoiceNo:    invoiceMap[so.id] || null,
-      doNo:         doMap[so.id] || null,
-      deliveryDate: so.delivery || so.deliveryDateRef || null,
-      submittedBy:  "SQL Account",
-      items:        so.lines || [],    // Postgres returns line items in the SO
-      source:       "sql",
-      status:       so.status,
-      statusNote:   so.statusNote,
-    }));
+    .map(so => {
+      const doList  = soDOMap[so.dockey]  || [];
+      const invList = soINVMap[so.dockey] || [];
+      return {
+        soNo:         so.id,
+        dockey:       so.dockey || null,
+        customer:     so.customer || so.companyname || "—",
+        customerCode: so.customerCode || null,
+        poRef:        so.poRef || "—",
+        amount:       so.amount || 0,
+        date:         so.date,
+        invoiceNo:    invList.length ? invList.map(i=>i.docno).join(", ") : null,
+        doNo:         doList.length  ? doList.map(d=>d.docno).join(", ")  : null,
+        deliveryDate: so.delivery || so.deliveryDateRef || null,
+        submittedBy:  "SQL Account",
+        items:        so.lines || [],
+        source:       "sql",
+        status:       so.status,
+        statusNote:   so.statusNote,
+        isDone:       isSoDone(so),
+      };
+    });
 
   const allEntries = [...occEntries, ...sqlOnlyEntries];
 
-  // Apply filters
-  const filtered = allEntries.filter(e => {
-    const soNoStr    = String(e.soNo || "");
-    const custStr    = String(e.customer || "");
-    const invStr     = String(e.invoiceNo || "");
-    const doStr      = String(e.doNo || "");
+  // Split into Active and History
+  const activeEntries = allEntries.filter(e => !e.isDone);
+  const historyEntries = allEntries.filter(e => e.isDone);
+
+  // Apply filters to active entries
+  const filtered = activeEntries.filter(e => {
     const ms = !search ||
-      soNoStr.toLowerCase().includes(search.toLowerCase()) ||
-      custStr.toLowerCase().includes(search.toLowerCase()) ||
-      invStr.toLowerCase().includes(search.toLowerCase()) ||
-      doStr.toLowerCase().includes(search.toLowerCase());
-    const src     = source==="all" || e.source===source;
-    const hasInv  = !!e.invoiceNo;
-    const hasDO   = !!e.doNo;
+      String(e.soNo||"").toLowerCase().includes(search.toLowerCase()) ||
+      String(e.customer||"").toLowerCase().includes(search.toLowerCase()) ||
+      String(e.invoiceNo||"").toLowerCase().includes(search.toLowerCase()) ||
+      String(e.doNo||"").toLowerCase().includes(search.toLowerCase());
+    const src = source==="all" || e.source===source;
+    const hasInv = !!e.invoiceNo;
+    const hasDO  = !!e.doNo;
     if (filter==="pending_inv")  return ms && src && !hasInv;
     if (filter==="pending_do")   return ms && src && !hasDO;
     if (filter==="pending_both") return ms && src && !hasInv && !hasDO;
@@ -389,20 +456,30 @@ export default function DocumentTracker() {
     return ms && src;
   });
 
+  // History search
+  const filteredHistory = historyEntries.filter(e => {
+    if (!search) return true;
+    return String(e.soNo||"").toLowerCase().includes(search.toLowerCase()) ||
+      String(e.customer||"").toLowerCase().includes(search.toLowerCase()) ||
+      String(e.invoiceNo||"").toLowerCase().includes(search.toLowerCase()) ||
+      String(e.doNo||"").toLowerCase().includes(search.toLowerCase());
+  });
+
   const stats = {
-    total:       allEntries.length,
-    occLogged:   occEntries.length,
-    sqlOnly:     sqlOnlyEntries.length,
-    pendingBoth: allEntries.filter(e=>!e.invoiceNo&&!e.doNo).length,
-    pendingInv:  allEntries.filter(e=>!e.invoiceNo).length,
-    pendingDO:   allEntries.filter(e=>!e.doNo).length,
-    complete:    allEntries.filter(e=>e.invoiceNo&&e.doNo).length,
-    outstanding: allEntries.filter(e=>!e.invoiceNo||!e.doNo).reduce((s,e)=>s+(e.amount||0),0),
+    total:       activeEntries.length,
+    pendingBoth: activeEntries.filter(e=>!e.invoiceNo&&!e.doNo).length,
+    pendingInv:  activeEntries.filter(e=>!e.invoiceNo).length,
+    pendingDO:   activeEntries.filter(e=>!e.doNo).length,
+    complete:    activeEntries.filter(e=>e.invoiceNo&&e.doNo).length,
+    outstanding: activeEntries.filter(e=>!e.invoiceNo||!e.doNo).reduce((s,e)=>s+(e.amount||0),0),
+    history:     historyEntries.length,
   };
 
   if (loading) return (
     <div style={{padding:48, textAlign:"center", color:"#94A3B8", fontSize:14}}>Loading document tracker...</div>
   );
+
+  const tableHeaders = ["Source","SO Number","Customer","Amount","Date","Invoice","Delivery Order","Delivery Date","Action"];
 
   return (
     <div style={{padding:"24px 28px", maxWidth:1280, margin:"0 auto"}}>
@@ -411,7 +488,7 @@ export default function DocumentTracker() {
       <div style={{display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:20, flexWrap:"wrap", gap:12}}>
         <div>
           <div style={{fontSize:20, fontWeight:800, color:"#0F172A", marginBottom:4}}>Document Tracker</div>
-          <div style={{fontSize:13, color:"#94A3B8"}}>All open SOs · Click any row missing Invoice or DO to create them instantly</div>
+          <div style={{fontSize:13, color:"#94A3B8"}}>Active SOs needing DO & Invoice · Linked via SQL Account transfer chain</div>
         </div>
         <button onClick={load} style={{padding:"8px 16px", borderRadius:8, border:"1px solid #E2E8F0", background:"#F8FAFC", color:"#1E3A5F", fontSize:12, fontWeight:700, cursor:"pointer"}}>
           🔄 Refresh
@@ -421,12 +498,12 @@ export default function DocumentTracker() {
       {/* KPI strip */}
       <div style={{display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))", gap:12, marginBottom:20}}>
         {[
-          {label:"Total Open SOs",   value:stats.total,       color:"#1E3A5F", key:"all"},
-          {label:"Missing Both",     value:stats.pendingBoth, color:"#dc2626", key:"pending_both"},
-          {label:"Missing Invoice",  value:stats.pendingInv,  color:"#d97706", key:"pending_inv"},
-          {label:"Missing DO",       value:stats.pendingDO,   color:"#7c3aed", key:"pending_do"},
-          {label:"Complete",         value:stats.complete,    color:"#16a34a", key:"complete"},
-          {label:"Outstanding",      value:fmtRM(stats.outstanding), color:"#dc2626", key:null},
+          {label:"Active SOs",      value:stats.total,       color:"#1E3A5F", key:"all"},
+          {label:"Missing Both",    value:stats.pendingBoth, color:"#dc2626", key:"pending_both"},
+          {label:"Missing Invoice", value:stats.pendingInv,  color:"#d97706", key:"pending_inv"},
+          {label:"Missing DO",      value:stats.pendingDO,   color:"#7c3aed", key:"pending_do"},
+          {label:"Complete",        value:stats.complete,    color:"#16a34a", key:"complete"},
+          {label:"Outstanding",     value:fmtRM(stats.outstanding), color:"#dc2626", key:null},
         ].map(c=>(
           <div key={c.key||c.label} onClick={()=>c.key&&setFilter(filter===c.key?"all":c.key)}
             style={{background:filter===c.key?c.color:"#fff", borderRadius:14, padding:"14px 16px",
@@ -439,16 +516,13 @@ export default function DocumentTracker() {
         ))}
       </div>
 
-      {/* Table */}
+      {/* Active SOs Table */}
       <div style={{background:"#fff", borderRadius:16, border:"1px solid #EEF2F7", overflow:"hidden"}}>
         <div style={{padding:"14px 18px", borderBottom:"1px solid #F1F5F9", display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10}}>
           <div>
             <div style={{fontSize:13, fontWeight:800, color:"#0F172A"}}>
-              {filter==="all"?"All SOs":filter==="pending_both"?"❌ Missing Invoice & DO":filter==="pending_inv"?"⚠️ Missing Invoice":filter==="pending_do"?"⚠️ Missing DO":"✅ Complete"}
+              {filter==="all"?"Active SOs":filter==="pending_both"?"❌ Missing Invoice & DO":filter==="pending_inv"?"⚠️ Missing Invoice":filter==="pending_do"?"⚠️ Missing DO":"✅ Complete"}
               <span style={{fontWeight:400, color:"#94A3B8", fontSize:12, marginLeft:8}}>— {filtered.length} records</span>
-            </div>
-            <div style={{fontSize:11, color:"#94A3B8", marginTop:2}}>
-              {stats.occLogged} via OCC · {stats.sqlOnly} from SQL · Click a row to create missing documents
             </div>
           </div>
           <div style={{display:"flex", gap:8, flexWrap:"wrap", alignItems:"center"}}>
@@ -467,7 +541,7 @@ export default function DocumentTracker() {
           <table style={{width:"100%", borderCollapse:"collapse", fontSize:12}}>
             <thead>
               <tr style={{background:"#F8FAFC"}}>
-                {["Source","SO Number","Customer","Amount","Date","Invoice","Delivery Order","Delivery Date","Action"].map(h=>(
+                {tableHeaders.map(h=>(
                   <th key={h} style={{padding:"9px 12px", textAlign:"left", fontSize:10, color:"#94A3B8", fontWeight:700, textTransform:"uppercase", letterSpacing:"0.06em", whiteSpace:"nowrap"}}>{h}</th>
                 ))}
               </tr>
@@ -476,78 +550,51 @@ export default function DocumentTracker() {
               {filtered.length===0 && (
                 <tr><td colSpan={9} style={{padding:"48px", textAlign:"center", color:"#94A3B8"}}>No records found</td></tr>
               )}
-              {filtered.map((e,i) => {
-                const hasInv    = !!e.invoiceNo;
-                const hasDO     = !!e.doNo;
-                const isComplete= hasInv && hasDO;
-                const isExp     = expanded === e.soNo + i;
-                const rowBg     = isExp ? "#EFF6FF" : isComplete ? "#F0FDF4" : (!hasInv&&!hasDO) ? "#FEF2F2" : "#FFFBEB";
-                const canCreate = !isComplete;
-
-                return (
-                  <React.Fragment key={e.soNo+i}>
-                    <tr style={{borderTop:"1px solid #F1F5F9", background:rowBg, cursor:canCreate?"pointer":"default"}}
-                      onClick={()=>canCreate && setExpanded(isExp ? null : e.soNo+i)}>
-                      <td style={{padding:"10px 12px"}}>
-                        {e.source==="occ"
-                          ? <span style={{fontSize:10, background:"#DBEAFE", color:"#1d4ed8", padding:"2px 7px", borderRadius:99, fontWeight:700}}>OCC</span>
-                          : <span style={{fontSize:10, background:"#F1F5F9", color:"#64748B", padding:"2px 7px", borderRadius:99, fontWeight:700}}>SQL</span>
-                        }
-                      </td>
-                      <td style={{padding:"10px 12px", fontWeight:800, color:"#1E3A5F"}}>{e.soNo}</td>
-                      <td style={{padding:"10px 12px", fontWeight:500, maxWidth:180, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>{e.customer}</td>
-                      <td style={{padding:"10px 12px", fontWeight:600}}>{e.amount ? fmtRM(e.amount) : "—"}</td>
-                      <td style={{padding:"10px 12px", color:"#64748B", whiteSpace:"nowrap"}}>{fmtDate(e.date)}</td>
-                      <td style={{padding:"10px 12px"}}>
-                        {hasInv
-                          ? <span style={{fontWeight:700, color:"#1d4ed8", fontSize:12}}>{e.invoiceNo}</span>
-                          : <span style={{fontSize:10, background:"#FEF3C7", color:"#92400E", padding:"3px 8px", borderRadius:99, fontWeight:700}}>⏳ Missing</span>
-                        }
-                      </td>
-                      <td style={{padding:"10px 12px"}}>
-                        {hasDO
-                          ? <span style={{fontWeight:700, color:"#7c3aed", fontSize:12}}>{e.doNo}</span>
-                          : <span style={{fontSize:10, background:"#EDE9FE", color:"#6d28d9", padding:"3px 8px", borderRadius:99, fontWeight:700}}>⏳ Missing</span>
-                        }
-                      </td>
-                      <td style={{padding:"10px 12px", color:"#64748B", whiteSpace:"nowrap"}}>{e.deliveryDate||"—"}</td>
-                      <td style={{padding:"10px 12px"}}>
-                        {canCreate ? (
-                          <button onClick={ev=>{ev.stopPropagation(); setExpanded(isExp?null:e.soNo+i);}}
-                            style={{padding:"5px 12px", borderRadius:8, border:"none", cursor:"pointer", fontSize:11, fontWeight:700,
-                              background:isExp?"#1E3A5F":"#EFF6FF", color:isExp?"#fff":"#1d4ed8"}}>
-                            {isExp ? "▲ Close" : (!hasInv&&!hasDO) ? "➕ Create DO + INV" : !hasInv ? "➕ Create Invoice" : "➕ Create DO"}
-                          </button>
-                        ) : (
-                          <span style={{fontSize:10, background:"#F0FDF4", color:"#16a34a", padding:"2px 8px", borderRadius:99, fontWeight:700}}>✅ Complete</span>
-                        )}
-                      </td>
-                    </tr>
-
-                    {isExp && (
-                      <tr>
-                        <td colSpan={9} style={{padding:"0 16px 16px 52px", background:"#EFF6FF", borderBottom:"2px solid #BFDBFE"}}>
-                          <CreateDocPanel
-                            entry={e}
-                            onClose={()=>setExpanded(null)}
-                            onDone={()=>{ setExpanded(null); setTimeout(load, 1500); }}
-                          />
-                        </td>
-                      </tr>
-                    )}
-                  </React.Fragment>
-                );
-              })}
+              {filtered.map((e,i) => (
+                <SORow key={e.soNo+i} e={e} i={i} expanded={expanded} setExpanded={setExpanded} load={load} isHistory={false} />
+              ))}
             </tbody>
           </table>
         </div>
       </div>
 
-      {stats.sqlOnly > 0 && (
-        <div style={{marginTop:12, background:"#FFFBEB", borderRadius:12, padding:"12px 16px", border:"1px solid #FCD34D", fontSize:12, color:"#92400E"}}>
-          ⚠️ <strong>{stats.sqlOnly} SOs from SQL Account not logged via OCC</strong> — you can still create Invoice and DO for these directly from this screen.
+      {/* History Section */}
+      <div style={{marginTop:24}}>
+        <div onClick={()=>setShowHistory(!showHistory)}
+          style={{display:"flex", justifyContent:"space-between", alignItems:"center", padding:"14px 18px",
+            background:"#fff", borderRadius:showHistory?"16px 16px 0 0":"16px", border:"1px solid #EEF2F7",
+            cursor:"pointer", userSelect:"none"}}>
+          <div>
+            <span style={{fontSize:13, fontWeight:800, color:"#64748B"}}>📁 History</span>
+            <span style={{fontWeight:400, color:"#94A3B8", fontSize:12, marginLeft:8}}>— {stats.history} completed / done SOs</span>
+          </div>
+          <span style={{color:"#94A3B8", fontSize:14}}>{showHistory ? "▲" : "▼"}</span>
         </div>
-      )}
+
+        {showHistory && (
+          <div style={{background:"#fff", borderRadius:"0 0 16px 16px", border:"1px solid #EEF2F7", borderTop:"none", overflow:"hidden"}}>
+            <div style={{overflowX:"auto"}}>
+              <table style={{width:"100%", borderCollapse:"collapse", fontSize:12}}>
+                <thead>
+                  <tr style={{background:"#F8FAFC"}}>
+                    {tableHeaders.map(h=>(
+                      <th key={h} style={{padding:"9px 12px", textAlign:"left", fontSize:10, color:"#94A3B8", fontWeight:700, textTransform:"uppercase", letterSpacing:"0.06em", whiteSpace:"nowrap"}}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredHistory.length===0 && (
+                    <tr><td colSpan={9} style={{padding:"32px", textAlign:"center", color:"#94A3B8"}}>No history records</td></tr>
+                  )}
+                  {filteredHistory.map((e,i) => (
+                    <SORow key={"h"+e.soNo+i} e={e} i={1000+i} expanded={expanded} setExpanded={setExpanded} load={load} isHistory={true} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
