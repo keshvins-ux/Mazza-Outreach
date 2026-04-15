@@ -1231,6 +1231,7 @@ function App() {
   const [deals, setDeals] = useState([]);
   const [soData, setSoData] = useState([]);
   const [ivData, setIvData] = useState([]);
+  const [arTotal, setArTotal] = useState(0);
   const [rvData, setRvData] = useState([]);
   const [poData, setPoData] = useState([]);
   const [catMapLive, setCatMapLive] = useState(null);
@@ -1306,6 +1307,7 @@ function App() {
         setIvData(data.invoice || []);
         setRvData(data.rv || []);
         setPoData(data.po || []);
+        if (data.arTotal !== undefined) setArTotal(data.arTotal);
         if (data.catmap) setCatMapLive(data.catmap);
         if (data.updated) setSoLastSync(new Date(data.updated));
       } else {
@@ -1946,9 +1948,8 @@ function App() {
         const totalInvoiced  = currentMonthIV.filter(i=>i.amount>0).reduce((a,i)=>a+i.amount,0);
         // Collected = invoiced amount minus outstanding (most accurate across RV/CI data)
         const totalCollected = currentMonthIV.reduce((a,i)=>a+((i.amount||0)-(i.outstanding||0)),0);
-        // Outstanding: sum of unpaid invoice amounts (paymentamt unreliable in SQL API)
-        // Using invoice docamt for unpaid invoices as best approximation
-        const totalOutstanding = safeIvData.filter(i=>i.status!=="Paid"&&i.amount>0).reduce((a,i)=>a+i.amount,0);
+        // Outstanding: use real AR total from sql_customers (source of truth from SQL Account)
+        const totalOutstanding = arTotal || 0;
         const totalOverdueAmt  = safeIvData.filter(i=>i.status==="Overdue").reduce((a,i)=>a+(i.outstanding||0),0);
 
         // -- Invoice Aging Buckets (Xero-style) ----------------------------
