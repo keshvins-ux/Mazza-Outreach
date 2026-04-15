@@ -322,11 +322,12 @@ async function getSyncStatus() {
   return r.rows;
 }
 
-// ── SO → DO → INV link via fromdockey chain ─────────────────────
-// Returns { soDockeys with DOs, soDockeys with INVs, DO→INV map }
+// ── SO → DO → INV link via fromdockey chain + customer/item fallback ─
+// fromdockey covers ~26% of DO lines. For the rest, match by customer code + item code.
+// At the SO level we just need: "does this SO have at least one DO/INV?"
 async function getDocumentLinks() {
-  // DO lines link back to SO via fromdockey
-  const doLinks = await q(`
+  // Method 1: fromdockey (direct transfer chain — most accurate)
+  const doLinksDirect = await q(`
     SELECT DISTINCT
       dol.fromdockey AS so_dockey,
       do2.docno      AS do_docno,
@@ -338,8 +339,24 @@ async function getDocumentLinks() {
       AND do2.cancelled = false
   `);
 
-  // INV lines link back to DO via fromdockey
-  const invLinks = await q(`
+  // Method 2: customer code + item code fallback (for DOs without fromdockey)
+  const doLinksFallback = await q(`
+    SELECT DISTINCT
+      so.dockey      AS so_dockey,
+      do2.docno      AS do_docno,
+      do2.dockey     AS do_dockey,
+      do2.docdate::text AS do_date
+    FROM sql_so_lines sol
+    JOIN sql_salesorders so ON so.dockey = sol.dockey
+    JOIN sql_do_lines dol ON dol.itemcode = sol.itemcode AND dol.fromdockey IS NULL
+    JOIN sql_deliveryorders do2 ON do2.dockey = dol.dockey AND do2.code = so.code
+    WHERE so.cancelled = false
+      AND do2.cancelled = false
+      AND do2.docdate >= so.docdate
+  `);
+
+  // Method 1: fromdockey for INV→DO chain
+  const invLinksDirect = await q(`
     SELECT DISTINCT
       ivl.fromdockey AS do_dockey,
       iv.docno       AS inv_docno,
@@ -351,19 +368,36 @@ async function getDocumentLinks() {
       AND iv.cancelled = false
   `);
 
-  // Build SO → DOs map
-  const soDOMap = {};  // so_dockey -> [{ docno, dockey, date }]
-  for (const r of doLinks.rows) {
-    const key = r.so_dockey;
-    if (!soDOMap[key]) soDOMap[key] = [];
-    if (!soDOMap[key].find(d => d.docno === r.do_docno)) {
-      soDOMap[key].push({ docno: r.do_docno, dockey: r.do_dockey, date: r.do_date?.slice(0, 10) });
+  // Method 2: customer code + item code fallback for INV (INV lines without fromdockey)
+  const invLinksFallback = await q(`
+    SELECT DISTINCT
+      so.dockey      AS so_dockey,
+      iv.docno       AS inv_docno,
+      iv.dockey      AS inv_dockey,
+      iv.docdate::text AS inv_date
+    FROM sql_so_lines sol
+    JOIN sql_salesorders so ON so.dockey = sol.dockey
+    JOIN sql_inv_lines ivl ON ivl.itemcode = sol.itemcode AND ivl.fromdockey IS NULL
+    JOIN sql_salesinvoices iv ON iv.dockey = ivl.dockey AND iv.code = so.code
+    WHERE so.cancelled = false
+      AND iv.cancelled = false
+      AND iv.docdate >= so.docdate
+  `);
+
+  // Build SO → DOs map (merge both methods)
+  const soDOMap = {};
+  function addDO(soDockey, doDocno, doDockey, doDate) {
+    if (!soDOMap[soDockey]) soDOMap[soDockey] = [];
+    if (!soDOMap[soDockey].find(d => d.docno === doDocno)) {
+      soDOMap[soDockey].push({ docno: doDocno, dockey: doDockey, date: doDate?.slice(0, 10) });
     }
   }
+  for (const r of doLinksDirect.rows) addDO(r.so_dockey, r.do_docno, r.do_dockey, r.do_date);
+  for (const r of doLinksFallback.rows) addDO(r.so_dockey, r.do_docno, r.do_dockey, r.do_date);
 
-  // Build DO → INVs map
-  const doINVMap = {}; // do_dockey -> [{ docno, dockey, date }]
-  for (const r of invLinks.rows) {
+  // Build DO → INVs map (from fromdockey direct links)
+  const doINVMap = {};
+  for (const r of invLinksDirect.rows) {
     const key = r.do_dockey;
     if (!doINVMap[key]) doINVMap[key] = [];
     if (!doINVMap[key].find(i => i.docno === r.inv_docno)) {
@@ -371,21 +405,23 @@ async function getDocumentLinks() {
     }
   }
 
-  // Build SO → INVs map (chain through DO)
-  const soINVMap = {}; // so_dockey -> [{ docno, dockey, date }]
+  // Build SO → INVs map (chain through DO for direct links + direct fallback)
+  const soINVMap = {};
+  function addINV(soDockey, invDocno, invDockey, invDate) {
+    if (!soINVMap[soDockey]) soINVMap[soDockey] = [];
+    if (!soINVMap[soDockey].find(i => i.docno === invDocno)) {
+      soINVMap[soDockey].push({ docno: invDocno, dockey: invDockey, date: invDate?.slice(0, 10) });
+    }
+  }
+  // Chain: SO → DO → INV (via fromdockey on both sides)
   for (const [soDockey, dos] of Object.entries(soDOMap)) {
     for (const doEntry of dos) {
       const invs = doINVMap[doEntry.dockey] || [];
-      if (invs.length) {
-        if (!soINVMap[soDockey]) soINVMap[soDockey] = [];
-        for (const inv of invs) {
-          if (!soINVMap[soDockey].find(i => i.docno === inv.docno)) {
-            soINVMap[soDockey].push(inv);
-          }
-        }
-      }
+      for (const inv of invs) addINV(soDockey, inv.docno, inv.dockey, inv.date);
     }
   }
+  // Direct fallback: SO → INV (customer + item match)
+  for (const r of invLinksFallback.rows) addINV(r.so_dockey, r.inv_docno, r.inv_dockey, r.inv_date);
 
   return { soDOMap, soINVMap };
 }
@@ -403,17 +439,19 @@ export default async function handler(req, res) {
 
     if (type === 'so') {
       try {
-        const [soList, ivList, doList, rvList, syncStatus, docLinks] = await Promise.all([
+        const [soList, ivList, doList, rvList, syncStatus, docLinks, arTotal] = await Promise.all([
           getSalesOrders(),
           getSalesInvoices(),
           getDeliveryOrders(),
           getReceiptVouchers(),
           getSyncStatus(),
           getDocumentLinks(),
+          q(`SELECT COALESCE(SUM(outstanding::numeric), 0) AS total FROM sql_customers WHERE outstanding::numeric > 0`),
         ]);
         const soSync  = syncStatus.find(s => s.sync_type === 'SALESORDERS');
         const updated = soSync?.completed_at?.toISOString() ?? new Date().toISOString();
-        return res.status(200).json({ so: soList, invoice: ivList, dos: doList, rv: rvList, docLinks, updated, source: 'postgres' });
+        const realARTotal = parseFloat(arTotal.rows[0]?.total) || 0;
+        return res.status(200).json({ so: soList, invoice: ivList, dos: doList, rv: rvList, docLinks, arTotal: realARTotal, updated, source: 'postgres' });
       } catch(e) {
         console.error('prospects so error:', e.message);
         const client = await getRedisClient();
